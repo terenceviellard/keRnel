@@ -2,7 +2,7 @@
 % Please edit documentation in R/optim_HPs.R
 \name{optim_hp_L_BFGS_B}
 \alias{optim_hp_L_BFGS_B}
-\title{Optimize Hyperparameters for a kernel}
+\title{Optimize Hyperparameters for a kernel (with additive kernel support)}
 \usage{
 optim_hp_L_BFGS_B(
   hp,
@@ -11,7 +11,9 @@ optim_hp_L_BFGS_B(
   kern,
   post_cov,
   pen_diag = 1e-06,
-  verbose = FALSE
+  verbose = FALSE,
+  max_iter = 1000,
+  lambda = 0.1
 )
 }
 \arguments{
@@ -19,7 +21,7 @@ optim_hp_L_BFGS_B(
 
 \item{db}{The dataset used for optimization.}
 
-\item{mean}{The mean function}
+\item{mean}{The mean vector (must have length equal to nrow(db$Input))}
 
 \item{kern}{The kernel function}
 
@@ -27,11 +29,15 @@ optim_hp_L_BFGS_B(
 
 \item{pen_diag}{A penalty term added to the diagonal of the covariance matrix for numerical stability.}
 
-\item{verbose}{A logical value indicating whether to return the full optimization result or just the optimized parameters. Defaults to FALSE.}
+\item{verbose}{A logical value indicating whether to return the full optimization result or just the optimized parameters.}
+
+\item{max_iter}{Maximum number of iterations. Defaults to 1000.}
+
+\item{lambda}{L1 regularization parameter for additive kernels. Defaults to 0.1.}
 }
 \value{
 If \code{verbose} is FALSE, a vector of optimized hyperparameters; otherwise, the full result from the \code{optim} function.
 }
 \description{
-This function optimizes hyperparameters using the L-BFGS-B optimization method.
+Optimize Hyperparameters for a kernel (with additive kernel support)
 }
