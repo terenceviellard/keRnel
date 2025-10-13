@@ -119,7 +119,7 @@ gr_sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
   list_hp <- get_hyperparameter_names(kern)
   output <- db$Output
   input <- db$Input
-  input <- as.matrix((unique(input))
+  input <- as.matrix(unique(input))
 
   # Calcul de la matrice de covariance et son inverse
   cov <- pairwise_kernel(kern, input, input) + post_cov
