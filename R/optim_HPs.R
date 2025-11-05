@@ -78,9 +78,8 @@ sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
   kern <- set_hyperparameters(kern, hp)
   input <- db$Input
   input <- as.matrix(unique(input))
-
   # Calcul de la matrice de covariance
-  cov <- pairwise_kernel(kern, input, input) + post_cov
+  cov <- pairwise_kernel(kern, input, input) +post_cov
 
   # Inversion stable avec jitter
   inv <- chol_inv_jitter(cov, pen_diag = pen_diag)
