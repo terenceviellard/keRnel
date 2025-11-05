@@ -1,0 +1,174 @@
+```markdown
+# KeRnel: A Flexible R Package for Kernel Methods
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![R-CMD-check](https://github.com/terenceviellard/kernels/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/terenceviellard/kernels/actions/workflows/R-CMD-check.yaml)
+
+**KeRnel** is a modern, extensible R package for working with kernel methods in machine learning and Bayesian inference. It provides an object-oriented implementation of classical and composite kernels, along with tools for hyperparameter optimization, derivative computation, and visualization.
+
+---
+
+## 📥 Installation
+
+### Development version from GitHub
+```r
+# install.packages("devtools")
+devtools::install_github("terenceviellard/kernels")
+```
+
+---
+
+## ✨ Key Features
+
+- **Core Kernels**: Squared Exponential (SE), Matern (1/2, 3/2, 5/2), Rational Quadratic, Periodic, Linear, Constant, and Noise kernels
+- **Composite Kernels**: Sum and product combinations of kernels
+- **Hyperparameter Optimization**: Built-in L-BFGS-B optimization algorithm
+- **Analytical Derivatives**: Compute kernel derivatives with respect to hyperparameters
+- **Visualization Tools**: Generate kernel heatmaps and distance plots directly from code
+
+---
+
+## 🚀 Quick Start
+
+### 1. Load the package
+```r
+library(kernels)
+```
+
+### 2. Create kernels
+```r
+# Squared Exponential kernel
+se_kernel <- new("SEKernel", variance_se = 1.0, length_scale_se = 1.0)
+
+# Matern 3/2 kernel
+matern_kernel <- new("MaternKernel32", length_scale_mat = 1.0)
+
+# Composite kernel (sum of kernels)
+sum_kernel <- se_kernel + matern_kernel
+```
+
+### 3. Compute kernel matrix
+```r
+x <- matrix(rnorm(100), ncol = 2)
+K <- pairwise_kernel(se_kernel, x, x)
+```
+
+### 4. Optimize hyperparameters
+```r
+# Generate sample data
+set.seed(123)
+x <- matrix(rnorm(50), ncol = 2)
+
+# Optimize hyperparameters
+optimized_hp <- optim_hp_L_BFGS_B(
+  hp = c(variance_se = 1.0, length_scale_se = 1.0),
+  db = list(Input = x, Output = rnorm(50)),
+  mean = 0,
+  kern = se_kernel,
+  post_cov = 1e-6 * diag(nrow(x))
+)
+```
+
+---
+
+## 📊 Available Kernels
+
+| Kernel Class | Formula | Description |
+|--------------|---------|-------------|
+| `SEKernel` | $K(x,x') = \sigma^2 \exp\left(-\frac{\|x-x'\|^2}{2\ell^2}\right)$ | Squared Exponential (RBF) kernel |
+| `MaternKernel12` | $K(x,x') = \sigma^2 \exp\left(-\frac{\|x-x'\|}{\ell}\right)$ | Matern kernel with ν=1/2 |
+| `MaternKernel32` | $K(x,x') = \sigma^2 \left(1 + \frac{\sqrt{3}\|x-x'\|}{\ell}\right)\exp\left(-\frac{\sqrt{3}\|x-x'\|}{\ell}\right)$ | Matern kernel with ν=3/2 |
+| `MaternKernel52` | $K(x,x') = \sigma^2 \left(1 + \frac{\sqrt{5}\|x-x'\|}{\ell} + \frac{5\|x-x'\|^2}{3\ell^2}\right)\exp\left(-\frac{\sqrt{5}\|x-x'\|}{\ell}\right)$ | Matern kernel with ν=5/2 |
+| `RationalQuadraticKernel` | $K(x,x') = \sigma^2 \left(1 + \frac{\|x-x'\|^2}{2\alpha\ell^2}\right)^{-\alpha}$ | Rational Quadratic kernel |
+| `PeriodicKernel` | $K(x,x') = \sigma^2 \exp\left(-\frac{2\sin^2(\pi\|x-x'\|/p)}{\ell^2}\right)$ | Periodic kernel |
+| `LinearKernel` | $K(x,x') = \sigma_b^2 + \sigma_v^2(x-c)(x'-c)$ | Linear kernel |
+| `ConstantKernel` | $K(x,x') = c$ | Constant kernel |
+| `NoiseKernel` | $K(x,x') = \sigma^2 \delta_{x,x'}$ | Noise kernel |
+
+---
+
+## 🔧 Kernel Operations
+
+### Kernel Derivatives
+Compute derivatives of kernel functions with respect to hyperparameters:
+```r
+# Compute derivative with respect to length scale
+dK_dtheta <- kernel_deriv(se_kernel, x, x, "length_scale_se")
+```
+
+### Visualization
+```r
+# Generate kernel matrix visualization
+visualize_kernel(se_kernel, x)
+
+# Generate kernel vs distance plot
+plot_kernel_vs_distance(se_kernel, seq(-3, 3, length.out = 100))
+```
+
+---
+
+## 📊 Example: Complete Workflow
+
+Here's a complete example showing kernel creation, optimization, and visualization:
+
+```r
+# Set seed for reproducibility
+set.seed(456)
+
+# 1. Create sample data
+x <- seq(-5, 5, length.out = 50)
+y <- sin(x) + rnorm(50, sd = 0.1)
+
+# 2. Create and optimize kernel
+kernel <- new("SEKernel", variance_se = 1.0, length_scale_se = 1.0)
+
+optim_result <- optim_hp_L_BFGS_B(
+  hp = c(variance_se = 1.0, length_scale_se = 1.0),
+  db = list(Input = matrix(x, ncol = 1), Output = y),
+  mean = 0,
+  kern = kernel,
+  post_cov = 1e-6 * diag(50)
+)
+
+# 3. Visualize results
+# Generate kernel matrix heatmap
+visualize_kernel(kernel, matrix(x, ncol = 1))
+
+# Generate kernel vs distance plot
+plot_kernel_vs_distance(kernel, x)
+```
+
+---
+
+## 📂 Package Structure
+
+- **Kernel Classes**: All kernels inherit from the abstract `AbstractKernel` class
+- **S4 Methods**: Object-oriented implementation for robust extensibility
+- **Utility Functions**: `ensure_abstract_kernel()`, `get_hyperparameter_names()`, `set_hyperparameters()`, etc.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! To contribute:
+
+1. Fork the repository on GitHub
+2. Create a feature branch: `git checkout -b feature/new-kernel`
+3. Commit your changes: `git commit -am 'Add new kernel class'`
+4. Push to the branch: `git push origin feature/new-kernel`
+5. Open a Pull Request
+
+---
+
+## 📜 License
+
+This package is released under the **GPL-3** license.
+
+---
+
+## 📧 Contact
+
+For questions or suggestions:
+- Open an [issue](https://github.com/terenceviellard/kernels/issues)
+- Email: `terence.viellard@inrae.fr`
+```
