@@ -77,9 +77,19 @@ dmnorm <- function(x, mu, inv_Sigma, log = FALSE) {
 sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
   kern <- set_hyperparameters(kern, hp)
   input <- db$Input
-  input <- as.matrix(unique(input))
-  # Calcul de la matrice de covariance
-  cov <- pairwise_kernel(kern, input, input) +post_cov
+ #input <- as.matrix(unique(input))
+  input <- as.matrix((input))
+
+  cov <- pairwise_kernel(kern, input, input)
+
+  # Gestion de post_cov
+  if (length(post_cov) == 1) {
+    post_cov <- diag(n) * post_cov  # Convertit en matrice diagonale
+  } else if (dim(post_cov)[1] != n || dim(post_cov)[2] != n) {
+    stop(paste("post_cov doit être une matrice carrée de taille", n, "x", n))
+  }
+
+  cov <- cov + post_cov
 
   # Inversion stable avec jitter
   inv <- chol_inv_jitter(cov, pen_diag = pen_diag)
@@ -118,9 +128,20 @@ gr_sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
   list_hp <- get_hyperparameter_names(kern)
   output <- db$Output
   input <- db$Input
-  input <- as.matrix(unique(input))
+  input <- as.matrix((input))
+  #input <- as.matrix(unique(input))
+
   # Calcul de la matrice de covariance et son inverse
-  cov <- pairwise_kernel(kern, input, input) #+ post_cov
+  cov <- pairwise_kernel(kern, input, input)
+
+  # Gestion de post_cov
+  if (length(post_cov) == 1) {
+    post_cov <- diag(n) * post_cov  # Convertit en matrice diagonale
+  } else if (dim(post_cov)[1] != n || dim(post_cov)[2] != n) {
+    stop(paste("post_cov doit être une matrice carrée de taille", n, "x", n))
+  }
+
+  cov <- cov + post_cov
   inv <- chol_inv_jitter(cov, pen_diag = pen_diag)
 
   # Gestion de la moyenne
