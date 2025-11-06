@@ -867,6 +867,8 @@ setMethod(
 setMethod(
   "pairwise_kernel", "SEKernel",
   function(obj, x, y) {
+    x=unique(x)
+    y=unique(y)
     dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
     return(obj@variance_se * exp(-dx / (2 * obj@length_scale_se^2)))
   }
