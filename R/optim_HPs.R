@@ -119,10 +119,8 @@ gr_sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
   output <- db$Output
   input <- db$Input
   input <- as.matrix(unique(input))
-  print(dim(input))
-  print(dim(post_cov))
   # Calcul de la matrice de covariance et son inverse
-  cov <- pairwise_kernel(kern, input, input) + post_cov
+  cov <- pairwise_kernel(kern, input, input) #+ post_cov
   inv <- chol_inv_jitter(cov, pen_diag = pen_diag)
 
   # Gestion de la moyenne
