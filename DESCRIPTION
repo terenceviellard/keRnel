@@ -1,0 +1,19 @@
+Package: keRnel
+Title: Kernel toolbox in R
+Version: 0.0.0.9000
+Authors@R: 
+    person("Térence", "Viellard", , "terence.viellard@gmx.fr", role = c("aut", "cre"))
+Description: S4 class definition for kernels. Analytical gradient formulas for base kernels and combinations (sum and product).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    methods,
+    ggplot2
+Suggests: 
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+VignetteBuilder: knitr

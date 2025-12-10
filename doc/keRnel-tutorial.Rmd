@@ -1,0 +1,578 @@
+---
+title: "Advanced usage"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Advanced usage}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+
+
+
+## Table of Contents
+- [1. Introduction](#introduction)
+- [2. Commonly Used Kernels](#commonly-used-kernels)
+  - [2.1 Squared Exponential (SE)](#squared-exponential-se)
+  - [2.2 Rational Quadratic (RQ)](#rational-quadratic-rq)
+  - [2.3 Periodic](#periodic)
+  - [2.4 Matern](#matern)
+  - [2.5 Linear](#linear)
+  - [2.6 Constant](#constant)
+  - [2.7 Noise](#noise)
+- [3. Combining Kernels](#combining-kernels)
+- [4. Custom Kernels](#custom-kernels)
+
+## 1. Introduction {#introduction}
+
+
+In this vignette, we explore the diversity of *kernels* available in the **keRnel** package. We begin by examining commonly used kernels, then demonstrate how to combine them to address specific problems. Finally, we show how to extend the `AbstractKernel` class to create custom kernels.
+
+
+ 
+
+```{r setup}
+library(keRnel)
+```
+
+## 2. Commonly used kernels already implemented {#commonly-used-kernels}
+
+This section provides an overview of the kernels available in the **keRnel** package. For detailed documentation, refer to:
+
+```{r eval=FALSE}
+?kernel
+```
+
+
+
+
+
+| Kernel Type         | Class Name           | Key Parameters                          |
+|---------------------|----------------------|------------------------------------------|
+| Squared Exponential | SEKernel             | variance_se, length_scale_se             |
+| Rational Quadratic  | RationalQuadraticKernel | variance_rq, length_scale_rq, alpha_rq |
+| Periodic            | PeriodicKernel       | variance_per, length_scale_per, period  |
+| Matern 1/2          | MaternKernel12       | length_scale_mat                        |
+| Matern 3/2          | MaternKernel32       | length_scale_mat                        |
+| Matern 5/2          | MaternKernel52       | length_scale_mat                        |
+| Linear              | LinearKernel         | sigma2_b, sigma2_v, c                   |
+| Constant            | ConstantKernel       | value_c                                  |
+| Noise               | NoiseKernel          | value_c                                  |
+
+```{r}
+#Input for visualization 
+x = matrix(rnorm(100), ncol = 2)
+
+```
+
+
+### 2.1 Squared Exponential {#squared-exponential-se}
+
+The **Squared Exponential (SE) kernel** is ideal for modeling **smooth functions** with infinite differentiability.
+
+#### Definition
+Let \( \sigma \in \mathbb{R}_{+} \) and \( \ell \in \mathbb{R}_{+}^{*} \). Consider the squared exponential kernel defined by:
+
+\[
+K_{\text{SE}}(x, x') = \sigma^2 \exp\left(-\frac{\|x - x'\|^2}{2\ell^2}\right)
+\]
+
+where $\sigma$ is the signal standard deviation and $\ell$ is the length scale parameter.
+
+```{r}
+# Create an object of the SEKernel class.
+se_kernel = new("SEKernel")
+pretty_print(se_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(se_kernel)
+
+hp = c(12,1)
+se_kernel = set_hyperparameters(se_kernel, hp)
+pretty_print(se_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(se_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(se_kernel, x)
+```
+
+
+
+### 2.2. Rational Quadratic {#rational-quadratic-rq}
+**Rational Quadratic kernel** is suitable for functions with multiple length scales.
+#### Definition
+
+Let \( \sigma^2 \in \mathbb{R}_{+} \), \( \alpha \in \mathbb{R}_{+}^{*} \), and \( \ell \in \mathbb{R}_{+}^{*} \). Consider the RQ kernel defined by:
+
+\[
+K_{\text{RQ}}(x, x')  = \sigma^2 \left(1 + \frac{\|x - x'\|^2}{2 \alpha \ell^2}\right)^{-\alpha}
+\]
+
+
+```{r}
+# Create an object of the SEKernel class.
+RQ_kernel = new("RationalQuadraticKernel")
+pretty_print(RQ_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(RQ_kernel)
+
+hp = c(12,1,5)
+RQ_kernel = set_hyperparameters(RQ_kernel, hp)
+pretty_print(RQ_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(RQ_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(RQ_kernel, x)
+```
+
+
+
+
+
+
+### 2.3. Periodic Kernel {#periodic}
+
+**Periodic Kernel** captures recurrent patterns (e.g., seasonal sales, circadian rhythms).
+#### Definition
+
+Let \( \sigma^2 \in \mathbb{R}_{+} \), \( \ell \in \mathbb{R} \), and \( p \in \mathbb{R} \). Consider the periodic kernel defined by:
+
+\[
+K_{\text{Per}}(x, x') = \sigma^2 \exp \left( -\frac{2}{\ell^2} \sin^2 \left( \pi\frac{ x - x'}{p} \right) \right)
+\]
+
+
+```{r}
+# Create an object of the SEKernel class.
+per_kernel = new("PeriodicKernel")
+pretty_print(per_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(per_kernel)
+
+hp = c(12,1,5)
+per_kernel = set_hyperparameters(per_kernel, hp)
+pretty_print(per_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(per_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(per_kernel, x)
+```
+
+
+
+
+
+### 2.4. Matern Kernel {#matern}
+
+Here we implement three common versions of the Matern kernel.
+
+#### Definition with $\nu = 1/2 $
+
+**Matern Kernel with $\nu = 1/2 $** models non-smooth functions (e.g., Wi-Fi signal strength, rough terrain).
+
+
+Let \( \ell \in \mathbb{R}_{+}^{*}, \sigma^2 \in \mathbb{R}_{+} \). Consider the Matern Kernel with \(\nu\) =1/2 defined by:
+
+\[
+K_{\text{Mat}_{\nu = \frac{1}{2}}}(x, x') =  \sigma^2\cdot exp\left(-\frac{\|x - x'\|^2}{\ell}\right)
+\]
+
+
+
+```{r}
+# Create an object of the SEKernel class.
+mat_kernel12 = new("MaternKernel12")
+pretty_print(mat_kernel12)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(mat_kernel12)
+
+hp = c(12)
+mat_kernel12 = set_hyperparameters(mat_kernel12, hp)
+pretty_print(mat_kernel12)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(mat_kernel12, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(mat_kernel12, x)
+```
+
+
+#### Definition with $\nu = 3/2 $
+
+**Matern kernel with  $\nu = 3/2 $** balances smoothness and flexibility.
+
+
+Let \( \ell \in \mathbb{R}_{+}^{*} \), \(\sigma^2 \in \mathbb{R}_{+}\). Consider the Matern Kernel with \(\nu\) =3/2 defined by:
+
+\[
+K_{\text{Mat}_{\nu = \frac{3}{2}}}(x, x') =   \sigma^2\cdot\left( \frac{\sqrt{3}\cdot\|x - x'\|^2}{\ell} +1\right)exp\left(-\frac{\sqrt{3}\cdot\|x - x'\|^2}{\ell}\right)
+\]
+
+
+
+```{r}
+# Create an object of the SEKernel class.
+mat_kernel32 = new("MaternKernel32")
+pretty_print(mat_kernel32)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(mat_kernel32)
+
+hp = c(12)
+mat_kernel32 = set_hyperparameters(mat_kernel32, hp)
+pretty_print(mat_kernel32)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(mat_kernel32, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(mat_kernel32, x)
+```
+
+
+#### Definition avec $\nu = 5/2 $
+
+**Matern kernel with  $\nu = 3/2 $** is almost as smooth as SE but with faster decay.
+
+
+Let \( \ell \in \mathbb{R}_{+}^{*} \), \( \sigma^2 \in \mathbb{R}_{+} \). Consider the Matern Kernel with \(\nu\) =5/2 defined by:
+
+\[
+K_{\text{Mat}_{\nu = \frac{5}{2}}}(x, x') =   \sigma^2\cdot\left( \left( \frac{5(\|x - x'\|^2)^2}{3\ell^2} + \frac{\sqrt{5}\|x - x'\|^2}{\ell} + 1 \right) \exp \left( -\frac{\sqrt{5}\|x - x'\|^2}{\ell} \right) \right)
+\]
+
+
+```{r}
+# Create an object of the SEKernel class.
+mat_kernel52 = new("MaternKernel52")
+pretty_print(mat_kernel52)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(mat_kernel52)
+
+hp = c(12)
+mat_kernel52 = set_hyperparameters(mat_kernel52, hp)
+pretty_print(mat_kernel52)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(mat_kernel52, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(mat_kernel52, x)
+```
+
+
+
+### 2.5. Linear Kernel  {#linear}
+
+**Linear Kernel** is used for linear relationships (e.g., polynomial regression, feature interactions). 
+
+#### Definition
+
+Let \( \sigma^2_b \in \mathbb{R}_{+} \), \( \sigma^2_v \in \mathbb{R}_{+} \), and \( c \in \mathbb{R} \). Consider the linear kernel defined by:
+
+\[
+K_{\text{Lin}}(x, x') = \sigma^2_b + \sigma^2_v (x - c)(x' - c)
+\]
+
+
+```{r}
+# Create an object of the SEKernel class.
+lin_kernel = new("LinearKernel")
+pretty_print(lin_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(lin_kernel)
+
+hp = c(12,1,5)
+lin_kernel = set_hyperparameters(lin_kernel, hp)
+pretty_print(lin_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(lin_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(lin_kernel, x)
+```
+
+
+### 2.6. Constant Kernel {#constant}
+
+**Constant Kernel**  adds,for instance,  a global bias.
+
+#### Definition
+
+Let \( c \in \mathbb{R}_{+}^{*} \). Consider the constant kernel defined by:
+
+\[
+K_{\text{cst}}(x, x') = c \cdot \begin{bmatrix}
+1 & 1 & \cdots & 1 \\
+1 & 1 & \cdots & 1 \\
+\vdots & \vdots & \ddots & \vdots \\
+1 & 1 & \cdots & 1
+\end{bmatrix}
+\]
+
+```{r}
+# Create an object of the SEKernel class.
+cst_kernel = new("ConstantKernel")
+pretty_print(cst_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(cst_kernel)
+
+hp = c(12)
+cst_kernel = set_hyperparameters(cst_kernel, hp)
+pretty_print(cst_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(cst_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(cst_kernel, x)
+```
+
+
+### 2.7. Noise Kernel {#noise}
+**Noise Kernel** models,for instance, observation noise (e.g., measurement errors in experiments).
+#### Definition
+
+Let \( c \in \mathbb{R}_{+}^{*} \). Consider the noise kernel defined by:
+
+\[
+K_{\text{noise}}(x, x') = c \cdot I_n
+\]
+
+```{r}
+# Create an object of the SEKernel class.
+noise_kernel = new("NoiseKernel")
+pretty_print(noise_kernel)
+```
+
+It is possible to access both hyperparameters (${\sigma}$ and${\ell}$) and modify them.
+
+```{r}
+get_hyperparameter_values(noise_kernel)
+
+hp = c(12)
+noise_kernel = set_hyperparameters(noise_kernel, hp)
+pretty_print(noise_kernel)
+```
+#### Visualization 
+
+One can observe the heatmap of the covariance matrix obtained using this kernel.
+```{r warning=FALSE}
+visualize_kernel(noise_kernel, x)
+```
+
+We can observe the relationship between the distance between the inputs and the kernel.
+```{r}
+plot_kernel_vs_distance(noise_kernel, x)
+```
+
+
+
+For detailed documentation, use:
+
+```{r eval=FALSE}
+# Access the documentation for a specific kernel
+?SEKernel
+?RationalQuadraticKernel
+# Or browse all available kernels
+help(package = "keRnel")
+```
+
+
+## 3. Sum and product of kernels {#combining-kernels}
+
+We can exploit the properties that stipulate that a sum of kernels remains a kernel and that the product of kernels remains a kernel to construct more complex kernels. 
+
+The class system greatly simplifies this part. Objects created by sum or product are elements of the **SumKernel** or **ProductKernel** class, which inherits from **AbstractKernel** like the usual kernels. This means you can access the same title with hyperparameters and use the visualization functions.
+
+### Kernel for periodic data with smooth global variation
+
+```{r}
+linear_k = new("LinearKernel",sigma2_b = 1, sigma2_v = 1, c = 0)
+noise_k = new("NoiseKernel",value_c = 0.1)
+
+combined_k = linear_k + noise_k
+
+pretty_print(combined_k)
+```
+
+```{r warning=FALSE}
+visualize_kernel(combined_k, x)
+```
+
+```{r}
+plot_kernel_vs_distance(combined_k, x)
+```
+
+
+
+### Kernel spatio-temporal
+
+```{r}
+se_space_k = new("SEKernel",variance_se = 1, length_scale_se = 1)  # Space
+periodic_time_k = new("PeriodicKernel",variance_per = 1, length_scale_per = 0.5, period = 1)  # Time
+
+combined_k  = se_space_k * periodic_time_k
+
+pretty_print(combined_k)
+```
+
+
+```{r warning=FALSE}
+visualize_kernel(combined_k, x)
+```
+
+```{r}
+plot_kernel_vs_distance(combined_k, x)
+```
+
+
+## 4. Custom Kernels {#custom-kernels}
+
+ 
+You can extend the AbstractKernel class to implement custom kernels. Here is a minimal example with a kernel based on Minkowski distance :
+
+```{r}
+# Define a custom kernel class
+setClass(
+  "MinkowskiKernel",
+  contains = "AbstractKernel",
+  slots = c(
+    p = "numeric",    # Minkowski distance shape parameter
+    sigma = "numeric" # lengthscale
+  )
+)
+
+# Define the pairwise kernel method
+setMethod(
+  "pairwise_kernel", "MinkowskiKernel",
+  function(obj, x, y) {
+    dx = outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
+    exp(- dx^obj@p/ obj@sigma)
+    
+  }
+)
+
+# Define the hyperparameters method
+setMethod(
+  "gt_HPs", "MinkowskiKernel",
+  function(obj) {
+    list(sigma = obj@sigma, p = obj@p)
+  }
+)
+
+# Define the pretty print method
+setMethod(
+  "pretty_print", "MinkowskiKernel",
+  function(obj) {
+    sprintf("MinkowskiKernel(p=%.2f, sigma=%.2f)", obj@p, obj@sigma)
+  }
+)
+
+# Créer une instance du noyau
+minkowski_kernel = new("MinkowskiKernel", p = 2, sigma = 1.0)
+pretty_print(minkowski_kernel)
+
+# Compute the kernel matrix
+K_custom = pairwise_kernel(minkowski_kernel, x, x)
+
+print(K_custom[12,3])
+```
+
+
+```{r warning=FALSE}
+visualize_kernel(minkowski_kernel, x)
+```
+
+```{r}
+plot_kernel_vs_distance(minkowski_kernel, x)
+```
+
+
+
