@@ -14,12 +14,6 @@ knitr::opts_chunk$set(
 
 # KeRnel: A Comprehensive R Package for Kernel Methods
 
-<!-- badges: start -->
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![R-CMD-check](https://github.com/terenceviellard/kernels/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/terenceviellard/kernels/actions/workflows/R-CMD-check.yaml)
-[![CRAN status](https://www.r-pkg.org/badges/version/kernels)](https://CRAN.R-project.org/package=kernels)
-<!-- badges: end -->
-
 **KeRnel** is a comprehensive R package designed for working with kernel methods in machine learning, Bayesian inference, and statistical modeling. It provides a flexible framework for implementing, combining, and optimizing various types of kernels with a clean object-oriented interface.
 
 ## Features
@@ -155,7 +149,8 @@ KeRnel provides tools for optimizing kernel hyperparameters:
 
 ```{r}
 # Generate sample data for optimization
-y <- rnorm(25)
+n=25
+y <- rnorm(n)
 
 # Optimize hyperparameters
 optim_result <- optim_hp_L_BFGS_B(
