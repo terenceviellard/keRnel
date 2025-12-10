@@ -222,7 +222,7 @@ optim_hp_L_BFGS_B <- function(hp, db, mean, kern, post_cov, pen_diag=1e-6, verbo
 ########################################################################################"
 
 library(compiler)
-enableJIT(level = 3)
+
 
 chol_inv_jitter_optim <- function(mat, pen_diag, max_attempts = 5) {
   for (i in 1:max_attempts) {
@@ -366,6 +366,8 @@ optim_hp_L_BFGS_B <- function(hp, db, mean, kern, post_cov, pen_diag=1e-6, verbo
 }
 
 optim_hp_L_BFGS_B_optim <- function(hp, db, mean, kern, post_cov, pen_diag=1e-6, verbose = FALSE, max_iter = 100) {
+  enableJIT(level =1)
+
   objective <- function(hp) {
     sum_logGaussian_optim_compiled(hp, db, mean, kern, post_cov, pen_diag)
   }
@@ -396,8 +398,8 @@ optim_hp_L_BFGS_B_optim <- function(hp, db, mean, kern, post_cov, pen_diag=1e-6,
 library(BayesOmics)
 set.seed(123)
 data <- simu_db(nb_id = 400,
-                nb_group = 2,
-                nb_sample = 1)
+                nb_group = 1,
+                nb_sample = 10)
 SEKernel <- new("SEKernel")
 
 
@@ -410,6 +412,7 @@ post_cov_nul <- diag(0.1, n)
 
 #result <- optim_hp_L_BFGS_B_optim(hp, data, mean_nul, SEKernel, post_cov_nul, pen_diag=1e-6)
 #print(result)
+
 
 
 library(microbenchmark)

@@ -82,12 +82,6 @@ sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
 
   cov <- pairwise_kernel(kern, input, input)
 
-  # Gestion de post_cov
-  if (length(post_cov) == 1) {
-    post_cov <- diag(n) * post_cov  # Convertit en matrice diagonale
-  } else if (dim(post_cov)[1] != n || dim(post_cov)[2] != n) {
-    stop(paste("post_cov doit être une matrice carrée de taille", n, "x", n))
-  }
 
   cov <- cov + post_cov
 
@@ -133,13 +127,6 @@ gr_sum_logGaussian <- function(hp, db, mean, kern, post_cov, pen_diag) {
 
   # Calcul de la matrice de covariance et son inverse
   cov <- pairwise_kernel(kern, input, input)
-
-  # Gestion de post_cov
-  if (length(post_cov) == 1) {
-    post_cov <- diag(n) * post_cov  # Convertit en matrice diagonale
-  } else if (dim(post_cov)[1] != n || dim(post_cov)[2] != n) {
-    stop(paste("post_cov doit être une matrice carrée de taille", n, "x", n))
-  }
 
   cov <- cov + post_cov
   inv <- chol_inv_jitter(cov, pen_diag = pen_diag)
