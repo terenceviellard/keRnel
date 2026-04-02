@@ -1386,10 +1386,11 @@ setMethod(
 #' This kernel is a type of covariance function used in Gaussian process regression.
 #'
 #' @slot length_scale_mat A numeric value representing the length scale parameter.
+#' @slot variance_mat A numeric value representing the variance
 #' @export
 setClass("MaternKernel12",
          contains = "AbstractKernel",
-         slots = c(length_scale_mat = "numeric")
+         slots = c(variance_mat= "numeric",length_scale_mat = "numeric")
 )
 
 #' @title Initialize Method for MaternKernel12
@@ -1402,8 +1403,9 @@ setClass("MaternKernel12",
 #' @export
 setMethod(
   "initialize", "MaternKernel12",
-  function(.Object, length_scale_mat = 1) {
+  function(.Object, variance_mat= 1, length_scale_mat = 1) {
     .Object@length_scale_mat <- length_scale_mat
+    .Object@variance_mat <- variance_mat
     return(.Object)
   }
 )
@@ -1423,8 +1425,8 @@ setMethod(
 setMethod(
   "pairwise_kernel", "MaternKernel12",
   function(obj, x, y) {
-    dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
-    return(exp(-dx / obj@length_scale_mat))
+    dx <- sqrt(outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y))
+    return(obj@variance_mat*exp(-dx / obj@length_scale_mat))
   }
 )
 
@@ -1454,9 +1456,12 @@ setMethod(
   "kernel_deriv", "MaternKernel12",
   function(obj, x, y, param) {
     if (param == "length_scale_mat") {
-      dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
-      return((dx / obj@length_scale_mat^2) * exp(-dx / obj@length_scale_mat))
-    } else {
+      dx <- sqrt(outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y))
+      return(obj@variance_mat*(dx / obj@length_scale_mat^2) * exp(-dx / obj@length_scale_mat))
+    }
+    if (param == "variance_mat") {
+      return(pairwise_kernel(obj, x, y) / obj@variance_mat)}
+    else {
       stop("Unknown parameter for derivative calculation.")
     }
   }
@@ -1471,6 +1476,8 @@ setMethod(
 setMethod("show", "MaternKernel12", function(object) {
   cat("Matern Kernel 1/2:\n")
   cat("  Length Scale:", object@length_scale_mat, "\n")
+  cat("  Variance:", object@variance_mat, "\n")
+
 })
 
 #' @title Pretty Print Method for MaternKernel12
@@ -1481,7 +1488,7 @@ setMethod("show", "MaternKernel12", function(object) {
 #' @return A string representation of the object.
 #' @export
 setMethod("pretty_print", "MaternKernel12", function(obj) {
-  sprintf("MaternKernel12(length_scale=%.2f)", obj@length_scale_mat)
+  sprintf("MaternKernel12(variance=%.2f, length_scale=%.2f)", obj@variance_mat, obj@length_scale_mat)
 })
 
 #' @title Hyperparameters Method for MaternKernel12
@@ -1494,7 +1501,7 @@ setMethod("pretty_print", "MaternKernel12", function(obj) {
 setMethod(
   "gt_HPs", "MaternKernel12",
   function(obj) {
-    list(length_scale_mat = obj@length_scale_mat)
+    list(variance_mat = obj@variance_mat, length_scale_mat = obj@length_scale_mat)
   }
 )
 
@@ -1509,7 +1516,7 @@ setMethod(
 #' @export
 setClass("MaternKernel32",
          contains = "AbstractKernel",
-         slots = c(length_scale_mat = "numeric")
+         slots = c(variance_mat = "numeric", length_scale_mat = "numeric")
 )
 
 #' @title Initialize Method for MaternKernel32
@@ -1522,8 +1529,9 @@ setClass("MaternKernel32",
 #' @export
 setMethod(
   "initialize", "MaternKernel32",
-  function(.Object, length_scale_mat = 1) {
+  function(.Object, variance_mat = 1,length_scale_mat = 1) {
     .Object@length_scale_mat <- length_scale_mat
+    .Object@variance_mat <- variance_mat
     return(.Object)
   }
 )
@@ -1543,9 +1551,9 @@ setMethod(
 setMethod(
   "pairwise_kernel", "MaternKernel32",
   function(obj, x, y) {
-    dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
+    dx <- sqrt(outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y))
     sqrt3_r_div_l <- (sqrt(3) * dx) / obj@length_scale_mat
-    return((1 + sqrt3_r_div_l) * exp(-sqrt3_r_div_l))
+    return(obj@variance_mat*(1 + sqrt3_r_div_l) * exp(-sqrt3_r_div_l))
   }
 )
 
@@ -1574,8 +1582,11 @@ setMethod(
   function(obj, x, y, param) {
     if (param == "length_scale_mat") {
       dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
-      return(3 * dx^2 * exp(-sqrt(3) * dx / obj@length_scale_mat) / obj@length_scale_mat^3)
-    } else {
+      return(obj@variance_mat*3 * dx^2 * exp(-sqrt(3) * dx / obj@length_scale_mat) / obj@length_scale_mat^3)
+    }
+    if (param == "variance_mat") {
+      return(pairwise_kernel(obj, x, y) / obj@variance_mat)}
+    else {
       stop("Unknown parameter for derivative calculation.")
     }
   }
@@ -1589,6 +1600,7 @@ setMethod(
 #' @export
 setMethod("show", "MaternKernel32", function(object) {
   cat("Matern Kernel 3/2:\n")
+  cat("  Variance:", object@variance_mat, "\n")
   cat("  Length Scale:", object@length_scale_mat, "\n")
 })
 
@@ -1600,7 +1612,7 @@ setMethod("show", "MaternKernel32", function(object) {
 #' @return A string representation of the object.
 #' @export
 setMethod("pretty_print", "MaternKernel32", function(obj) {
-  sprintf("MaternKernel32(length_scale=%.2f)", obj@length_scale_mat)
+  sprintf("MaternKernel32(variance=%.2f, length_scale=%.2f)", obj@variance_mat, obj@length_scale_mat)
 })
 
 #' @title Hyperparameters Method for MaternKernel32
@@ -1613,7 +1625,7 @@ setMethod("pretty_print", "MaternKernel32", function(obj) {
 setMethod(
   "gt_HPs", "MaternKernel32",
   function(obj) {
-    list(length_scale_mat = obj@length_scale_mat)
+    list(variance_mat = obj@variance_mat, length_scale_mat = obj@length_scale_mat)
   }
 )
 
@@ -1627,7 +1639,7 @@ setMethod(
 #' @export
 setClass("MaternKernel52",
          contains = "AbstractKernel",
-         slots = c(length_scale_mat = "numeric")
+         slots = c(variance_mat = "numeric", length_scale_mat = "numeric")
 )
 
 #' @title Initialize Method for MaternKernel52
@@ -1640,8 +1652,9 @@ setClass("MaternKernel52",
 #' @export
 setMethod(
   "initialize", "MaternKernel52",
-  function(.Object, length_scale_mat = 1) {
+  function(.Object, variance_mat=1, length_scale_mat = 1) {
     .Object@length_scale_mat <- length_scale_mat
+    .Object@variance_mat <- variance_mat
     return(.Object)
   }
 )
@@ -1663,7 +1676,7 @@ setMethod(
   function(obj, x, y) {
     dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
     sqrt5_r_div_l <- (sqrt(5) * dx) / obj@length_scale_mat
-    return((1 + sqrt5_r_div_l + (5.0 / 3.0) * (dx / obj@length_scale_mat)^2) * exp(-sqrt5_r_div_l))
+    return(obj@variance_mat*(1 + sqrt5_r_div_l + (5.0 / 3.0) * (dx / obj@length_scale_mat)^2) * exp(-sqrt5_r_div_l))
   }
 )
 
@@ -1693,9 +1706,12 @@ setMethod(
   "kernel_deriv", "MaternKernel52",
   function(obj, x, y, param) {
     if (param == "length_scale_mat") {
-      dx <- outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y)
-      return(5 * dx^2 * exp(-sqrt(5) * dx / obj@length_scale_mat) * (obj@length_scale_mat + sqrt(5) * dx)^3 / obj@length_scale_mat^4)
-    } else {
+      dx <- sqrt(outer(rowSums(x^2), rowSums(y^2), FUN = "+") - 2 * tcrossprod(x, y))
+      return(obj@variance_mat*5 * dx^2 * exp(-sqrt(5) * dx / obj@length_scale_mat) * (obj@length_scale_mat + sqrt(5) * dx)^3 / obj@length_scale_mat^4)
+    }
+    if (param == "variance_mat") {
+      return(pairwise_kernel(obj, x, y) / obj@variance_mat)}
+    else {
       stop("Unknown parameter for derivative calculation.")
     }
   }
@@ -1709,6 +1725,7 @@ setMethod(
 #' @export
 setMethod("show", "MaternKernel52", function(object) {
   cat("Matern Kernel 5/2:\n")
+  cat("  Variance:", object@variance_mat, "\n")
   cat("  Length Scale:", object@length_scale_mat, "\n")
 })
 
@@ -1720,7 +1737,7 @@ setMethod("show", "MaternKernel52", function(object) {
 #' @return A string representation of the object.
 #' @export
 setMethod("pretty_print", "MaternKernel52", function(obj) {
-  sprintf("MaternKernel52(length_scale=%.2f)", obj@length_scale_mat)
+  sprintf("MaternKernel52(variance=%.2f, length_scale=%.2f)", obj@variance_mat, obj@length_scale_mat)
 })
 
 #' @title Hyperparameters Method for MaternKernel52
@@ -1733,6 +1750,6 @@ setMethod("pretty_print", "MaternKernel52", function(obj) {
 setMethod(
   "gt_HPs", "MaternKernel52",
   function(obj) {
-    list(length_scale_mat = obj@length_scale_mat)
+    list(variance_mat = obj@variance_mat, length_scale_mat = obj@length_scale_mat)
   }
 )
