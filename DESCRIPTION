@@ -1,0 +1,31 @@
+Package: keRnel
+Title: Composable Covariance Kernels for Gaussian Processes
+Version: 0.1.0
+Authors@R: c(
+    person("Térence", "Viellard", , "terence.viellard@gmail.com", role = c("aut", "cre"))
+  )
+Description: Provides a collection of composable covariance kernel functions
+    for Gaussian Process models. Kernels are immutable S3 objects that can be
+    combined with arithmetic operators ('+', '*') and wrapped to add
+    batching, automatic relevance determination, block structure, or input
+    dimension selection.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.1)
+Imports:
+    stats,
+    utils
+Suggests:
+    cli,
+    bench,
+    covr,
+    ggplot2,
+    knitr,
+    rmarkdown,
+    shiny,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0

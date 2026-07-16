@@ -1,0 +1,377 @@
+---
+title: "3. Engines, Batching, and Block Structure (Expert)"
+subtitle: "Computation engines, vectorisation internals, batching, heteroscedastic noise, and block covariance matrices"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{3. Engines, Batching, and Block Structure (Expert)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(keRnel)
+```
+
+This vignette assumes you have read `vignette("a-beginner")` and
+`vignette("b-intermediate")`. It covers the lowest level of the package:
+how `evaluate()` actually turns a kernel formula into a matrix, how to make
+that fast, and the wrappers that need more than a pointwise transform of
+their inner kernel's result (batching, per-input parameters, and block
+structure).
+
+## The 4-layer architecture, briefly
+
+Every base kernel's `evaluate()` goes through 4 layers:
+
+1. **`pairwise(kernel, x1, x2)`**: the formula for a *single* pair of
+   points -- always correct, the reference definition, exercised directly
+   in tests.
+2. **A mapping primitive** (`map_pairs()`, `map_diag()`): turns a
+   pairwise function into a full result, agnostic of the kernel and the
+   engine.
+3. **`engine_eval(engine, kernel, X1, X2)`**: picks *which* mapping
+   primitive to use -- this is the only layer that knows about the engine.
+4. **`evaluate()`**: the user-facing entry point. Coerces inputs, handles
+   missing values, applies the memory-size warning, and dispatches.
+
+Composite/wrapper kernels (`sum_kernel()`, `batch_kernel()`,
+`block_kernel()`...) skip layers 2-3 entirely: they override `evaluate()`
+directly and recombine the `evaluate()` results of their sub-kernels.
+
+## Computation engines
+
+An engine controls *how* a covariance result is computed from a kernel's
+`pairwise()` formula -- the policy of *which* mapping primitive to use.
+Every kernel has an `engine` field, defaulting to `dense_engine()`.
+
+### `dense_engine()`: the default
+
+Computes the full `N1 x N2` matrix:
+
+```{r}
+k <- se_kernel(length_scale = 1, engine = dense_engine())
+evaluate(k, c(0, 1, 2))
+```
+
+### `diagonal_engine()`: only the diagonal, in `O(n)` instead of `O(n^2)`
+
+When you only need `k(x1[i], x2[i])` for aligned pairs -- e.g. the
+predictive variance of a GP -- computing the full dense matrix and then
+taking its diagonal wastes `O(n^2)` work. `diagonal_engine()` computes only
+what is needed:
+
+```{r}
+k_diag <- se_kernel(length_scale = 1, engine = diagonal_engine())
+evaluate(k_diag, c(0, 1, 2), c(0, 1, 2))
+```
+
+This matches the diagonal of the dense result:
+
+```{r}
+identical(
+  evaluate(k_diag, c(0, 1, 2), c(0, 1, 2)),
+  diag(evaluate(k, c(0, 1, 2), c(0, 1, 2)))
+)
+```
+
+The performance difference is real and measurable:
+
+```{r}
+set.seed(1)
+x <- rnorm(2000)
+
+t_dense <- system.time(evaluate(se_kernel(length_scale = 1), x))
+t_diag <- system.time(evaluate(se_kernel(length_scale = 1, engine = diagonal_engine()), x, x))
+
+t_dense[["elapsed"]]
+t_diag[["elapsed"]]
+```
+
+::: {.alert .alert-info}
+`diagonal_engine()` is a deliberate design choice: when only the diagonal
+of the covariance matrix is needed, computing the full `n1 x n2` matrix and
+discarding everything off-diagonal wastes `O(n^2)` work. The optimisation
+is purely algebraic, so it pays off regardless of how the underlying
+kernel computation is implemented.
+:::
+
+`diagonal_engine()` requires `x1` and `x2` to have the same number of
+points:
+
+```{r, error = TRUE}
+evaluate(k_diag, c(0, 1, 2), c(0, 1))
+```
+
+## Vectorisation internals: writing a fast stationary kernel
+
+`vignette("b-intermediate")` showed how to write a minimal custom
+stationary kernel with just `pairwise()`. That kernel works correctly, but
+`evaluate()` falls back to `map_pairs()` -- an explicit double loop in R,
+calling `pairwise()` once per pair of points.
+
+For a stationary kernel, `pairwise(kernel, x1, x2)` is always
+`shape(kernel, distance_function(x1, x2))`: a scalar transform of a
+distance. Because R vectorises elementwise arithmetic (`exp()`, `^`, ...)
+over an entire matrix for free, providing a `shape()` method lets
+`evaluate()` apply the kernel's formula to a *whole distance matrix* at
+once, skipping the explicit point-by-point loop entirely -- as long as the
+distance itself also has a known vectorised form (`distance_matrix()`
+already provides one for squared Euclidean, Euclidean, Manhattan, dot
+product, and equality; anything else falls back to the same loop, still
+correct, just slower):
+
+```{r}
+cosine_kernel <- function(length_scale,
+                           length_scale_parametrisation = log_exp_parametrisation(),
+                           distance_function = euclidean_distance,
+                           engine = dense_engine()) {
+  kernel <- structure(
+    list(
+      length_scale = wrapped_param(length_scale, length_scale_parametrisation),
+      distance_function = resolve_distance_function(distance_function),
+      engine = engine
+    ),
+    class = c("cosine_kernel", "stationary_kernel", "kernel")
+  )
+  validate_kernel(kernel)
+  kernel
+}
+
+pairwise.cosine_kernel <- function(kernel, x1, x2) {
+  shape(kernel, kernel$distance_function(x1, x2))
+}
+
+# The one extra method that unlocks the fast, vectorised evaluate():
+shape.cosine_kernel <- function(kernel, d) {
+  cos(d / unwrap_param(kernel$length_scale))
+}
+
+k_cosine <- cosine_kernel(length_scale = 1)
+evaluate(k_cosine, c(0, 1, 2))
+```
+
+Writing `pairwise()` as `shape(kernel, distance)` keeps a single source of
+truth for the formula: `pairwise()` remains the always-correct reference
+(used directly in tests), while `evaluate()` transparently benefits from
+the fast path through `pairwise_matrix.stationary_kernel()`. You can verify
+both paths agree, computing the reference the slow way (one pair at a
+time, via `outer()`) and comparing it to `evaluate()`'s vectorised result:
+
+```{r}
+x <- c(-2, -1, 0, 1, 2)
+reference <- outer(x, x, Vectorize(function(a, b) pairwise(k_cosine, a, b)))
+identical(evaluate(k_cosine, x), reference)
+```
+
+The same pattern (a `shape()` method) applies to a custom
+`dot_product_kernel`, with `pairwise_matrix.dot_product_kernel()` reusing
+the vectorised dot-product fast path (`X1 %*% t(X2)`) the same way.
+
+## `batch_kernel()`: many covariance matrices at once
+
+Wraps a kernel so `evaluate()` produces several matrices at once, one per
+"batch element" -- typically because each batch element has its own
+hyperparameter values. Which hyperparameters vary per batch element is an
+explicit contract: by default it is auto-detected from the **length** of
+the value you give it (length 1 means shared, length `batch_size` means
+one value per element -- any other length is an error at construction, not
+a silent recycling), and it can always be declared by name via the
+`batch_axes` argument when auto-detection would be ambiguous (see
+`vignette("d-batching")` for the full story):
+
+```{r}
+k_batch <- batch_kernel(se_kernel(length_scale = c(1, 2, 3)), batch_size = 3)
+result <- evaluate(k_batch, c(0, 1, 2))
+dim(result) # (n1, n2, batch_size) -- batch dimension last, the natural
+            # shape produced by simplify2array()
+result[, , 2] # exactly se_kernel(length_scale = 2)'s matrix
+```
+
+A hyperparameter left as a single scalar is shared across every batch
+element:
+
+```{r}
+k_batch_shared <- batch_kernel(se_kernel(length_scale = 2), batch_size = 4)
+result_shared <- evaluate(k_batch_shared, c(0, 1))
+identical(result_shared[, , 1], result_shared[, , 4])
+```
+
+`batch_over_inputs = TRUE` additionally lets every batch element see a
+*different* set of input points, passed as a 3-dimensional array of shape
+`(batch_size, n_points, n_dims)`:
+
+```{r}
+x1 <- array(0, dim = c(2, 3, 1))
+x1[1, , ] <- c(0, 1, 2)
+x1[2, , ] <- c(10, 11, 12)
+
+k_batch_inputs <- batch_kernel(se_kernel(length_scale = 1), batch_size = 2, batch_over_inputs = TRUE)
+result_inputs <- evaluate(k_batch_inputs, x1)
+result_inputs[, , 1] # se_kernel evaluated on c(0, 1, 2)
+result_inputs[, , 2] # se_kernel evaluated on c(10, 11, 12)
+```
+
+### Nested batching
+
+A `batch_kernel()` can itself be wrapped inside another `batch_kernel()`,
+to handle more than one batch dimension at once. Declare each level's
+`batch_axes` explicitly so that every level owns its axis (each level then
+slices only its own hyperparameters, and levels may have different sizes
+-- see `vignette("d-batching")` for a worked two-hyperparameter grid):
+
+```{r}
+k_nested <- batch_kernel(
+  batch_kernel(se_kernel(length_scale = c(1, 2)) + white_noise_kernel(noise = c(.1, .2, .3)),
+               batch_size = 2, batch_axes = "length_scale"),
+  batch_size = 3, batch_axes = "noise"
+)
+get_params(k_nested) # all values, regardless of nesting depth
+dim(evaluate(k_nested, c(0, 1))) # (n, n, inner batch, outer batch)
+```
+
+`get_params()`/`kupdate()`/`freeze()` work through any nesting depth
+without modification, because they recurse through `$subkernels` uniformly.
+
+::: {.alert .alert-info}
+This is more than a cosmetic convenience. `frozen` lives directly on each
+`wrapped_param`, with no parallel mask structure that needs to mirror the
+kernel's shape. That design avoids an entire class of bugs that a
+separate-mask-tree approach would be exposed to once batching nests:
+because freezing is a property of the parameter itself rather than of a
+side structure that must stay in sync, nested `batch_kernel()`s freeze and
+unfreeze correctly with no special-casing.
+:::
+
+## `input_specific_param_kernel()`: a parameter per input point
+
+Similar to `batch_kernel()`, but varies a hyperparameter per **point of
+`x1`** rather than per batch element -- the canonical use case is
+heteroscedastic noise (a different noise level for each observation):
+
+```{r}
+k_het_noise <- input_specific_param_kernel(
+  white_noise_kernel(noise = c(0.1, 0.5, 0.2)),
+  input_size = 3
+)
+evaluate(k_het_noise, c(0, 1, 2))
+```
+
+Combine with `+` for a GP with heteroscedastic observation noise on top of
+a smooth signal kernel:
+
+```{r}
+k_model <- se_kernel(length_scale = 1) + k_het_noise
+diag(evaluate(k_model, c(0, 1, 2)))
+```
+
+## Block covariance matrices
+
+### `block_diag_kernel()`: independent blocks
+
+The simple case: builds a block-diagonal matrix of `nb_blocks` *independent*
+blocks (off-diagonal blocks are exactly `0`). Internally, this is just
+`batch_kernel()` plus reassembling the result:
+
+```{r}
+k_block_diag <- block_diag_kernel(se_kernel(length_scale = c(1, 2)), nb_blocks = 2)
+evaluate(k_block_diag, c(0, 1))
+```
+
+### `block_kernel()`: blocks with cross-terms
+
+The harder case: also computes the *cross*-block terms (block `(i, j)` for
+`i != j`), rather than leaving them at `0`. This only makes mathematical
+sense if the inner kernel can read a **pair** of hyperparameter values at
+once (one per "side" of the block) -- most kernels cannot.
+`feature_kernel()` is designed for exactly this:
+
+```{r}
+inner <- feature_kernel(length_scale = c(1, 3), length_scale_u = 1, variance = c(2, 1))
+k_block <- block_kernel(inner, nb_blocks = 2)
+evaluate(k_block, c(0, 1))
+```
+
+A kernel that does *not* know how to interpret a paired hyperparameter
+value raises an explicit error rather than silently producing a
+mathematically meaningless result:
+
+```{r, error = TRUE}
+block_kernel(se_kernel(length_scale = c(1, 2)), nb_blocks = 2)
+```
+
+...unless every hyperparameter is shared (length 1), in which case no
+pairing is ever attempted and every block is simply identical:
+
+```{r}
+k_block_shared <- block_kernel(se_kernel(length_scale = 1), nb_blocks = 2)
+result <- evaluate(k_block_shared, c(0, 1))
+identical(result[1:2, 1:2], result[3:4, 3:4])
+```
+
+Internally, `block_kernel()` only computes the upper triangle of blocks and
+mirrors the rest by transposition, exploiting the fact that a
+`block_compatible` kernel's formula is symmetric under swapping which side
+is "left"/"right" together with which input is `x1`/`x2`:
+
+```{r}
+identical(evaluate(k_block, c(0, 1))[1:2, 3:4], t(evaluate(k_block, c(0, 1))[3:4, 1:2]))
+```
+
+A kernel must be explicitly marked block-compatible (an attribute,
+`attr(kernel, "block_compatible")`) to be used this way -- `feature_kernel()`
+already carries this marker:
+
+```{r}
+isTRUE(attr(feature_kernel(length_scale = 1, length_scale_u = 1, variance = 1), "block_compatible"))
+```
+
+## The memory-size warning guard
+
+Building a dense `n1 x n2` matrix gets expensive quickly, and R has neither
+JIT compilation nor GPU offload to absorb the cost. `evaluate()` warns (not
+errors) above a configurable threshold:
+
+```{r}
+withCallingHandlers(
+  evaluate(se_kernel(length_scale = 1), seq_len(10), memory_warning_threshold = 5),
+  warning = function(w) {
+    message("Caught: ", conditionMessage(w))
+    invokeRestart("muffleWarning")
+  }
+)
+```
+
+Raise the threshold (or set it to `Inf`) to silence it once you know what
+you are doing:
+
+```{r}
+result <- evaluate(se_kernel(length_scale = 1), seq_len(10), memory_warning_threshold = Inf)
+dim(result)
+```
+
+## Summary
+
+This vignette covered the more advanced machinery `keRnel` provides for
+building and composing kernels efficiently:
+
+- `dense_engine()` and `diagonal_engine()` let you choose how a covariance
+  matrix is computed, picking the cheaper diagonal-only path when that's
+  all you need.
+- `batch_kernel()` produces several covariance matrices at once, with
+  per-batch-element hyperparameters inferred automatically from value
+  length, and nests cleanly without special-casing.
+- `input_specific_param_kernel()` varies a hyperparameter per input point,
+  the natural fit for heteroscedastic noise.
+- `block_kernel()`/`block_diag_kernel()` build block covariance matrices
+  for grouped data, relying on the `block_compatible` marker.
+- The memory-size warning guard in `evaluate()` flags expensive dense
+  matrix builds before they happen, without forcing you to abandon them.
+- `kernel_interactions()` is a standalone ergonomic feature for inspecting
+  how composed kernels relate to their subkernels.

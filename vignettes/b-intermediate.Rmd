@@ -1,0 +1,451 @@
+---
+title: "2. Customizing and Fitting Kernels (Intermediate)"
+subtitle: "Hyperparameters, immutable updates, freezing, parametrisations, distances, ARD, priors, and custom kernels"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{2. Customizing and Fitting Kernels (Intermediate)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(keRnel)
+```
+
+This vignette assumes you have read `vignette("a-beginner")`. It covers
+everything you need to fit a kernel's hyperparameters to data: introspecting
+them, updating them immutably, excluding some from optimisation, and
+controlling exactly how each one is constrained.
+
+## Inspecting hyperparameters: `get_params()`
+
+Every kernel stores its hyperparameters internally in an unconstrained
+("wrapped") space suitable for a generic optimiser, but exposes them in
+their natural, constrained space via `get_params()`:
+
+```{r}
+k <- se_kernel(length_scale = 2.5) + se_kernel(length_scale = 1.5)
+get_params(k)
+```
+
+`get_params()` recurses through any composition of kernels, returning every
+hyperparameter found anywhere in the tree:
+
+```{r}
+k_composite <- se_kernel(length_scale = 1) + white_noise_kernel(noise = 0.1)
+get_params(k_composite)
+```
+
+## Immutable updates: `kupdate()`
+
+Kernels are immutable: there is no way to change a kernel "in place".
+Instead, `kupdate()` returns a **new** kernel with the requested
+hyperparameter(s) changed, leaving the original untouched:
+
+```{r}
+k1 <- se_kernel(length_scale = 1)
+k2 <- kupdate(k1, length_scale = 5)
+
+get_params(k1) # unchanged
+get_params(k2) # updated
+```
+
+`kupdate()` is a single generic that works on *any* kernel, however deeply
+composed, by finding the hyperparameter wherever it occurs:
+
+```{r}
+k3 <- se_kernel(length_scale = 1) * se_kernel(length_scale = 1)
+k4 <- kupdate(k3, length_scale = 9) # updates *both* occurrences
+get_params(k4)
+```
+
+A typo is caught immediately, rather than silently doing nothing:
+
+```{r, error = TRUE}
+kupdate(k1, length_scael = 5)
+```
+
+::: {.alert .alert-info}
+`kupdate()` works the same way on every kernel type because R's S3 dispatch
+picks the right update logic for sums, products, wrappers, and base kernels
+alike, so there's a single generic to remember rather than a method per
+kernel class. It is named `kupdate()` rather than `replace()` because
+`base::replace()` already exists in R (and is not an S3 generic), so
+overriding it would shadow a base function.
+:::
+
+## Freezing parameters: `freeze()`/`unfreeze()`
+
+When fitting a GP, you sometimes want to hold a hyperparameter fixed (not
+let the optimiser touch it) while still using it in every computation.
+`freeze()` marks a hyperparameter as excluded from `get_trainable_params()`
+(the vector an optimiser should actually act on), without removing it from
+`get_params()` (the *full* picture of the kernel's current configuration):
+
+```{r}
+k <- se_kernel(length_scale = 2) + white_noise_kernel(noise = 0.1)
+k_frozen <- freeze(k, "noise")
+
+get_params(k_frozen) # both still listed
+get_trainable_params(k_frozen) # noise excluded
+```
+
+`unfreeze()` reverses it:
+
+```{r}
+k_unfrozen <- unfreeze(k_frozen, "noise")
+get_trainable_params(k_unfrozen)
+```
+
+A frozen kernel still computes normally -- `freeze()` only affects which
+values an optimiser sees, not the kernel's behaviour:
+
+```{r}
+evaluate(k, c(0, 1)) - evaluate(k_frozen, c(0, 1)) # identical
+```
+
+## Parametrisations: how a hyperparameter is constrained
+
+Every hyperparameter is associated with a **parametrisation**: an object
+that knows how to map the value between its natural (constrained) space and
+an unconstrained space suitable for a generic optimiser. The default for a
+strictly positive hyperparameter (like `length_scale`) is
+`log_exp_parametrisation()`:
+
+```{r}
+k <- se_kernel(length_scale = 1)
+k$length_scale$parametrisation
+```
+
+### `log_exp_parametrisation()`: the default for positive values
+
+Maps via `log()`/`exp()`. Validation (strict positivity) happens *inside*
+`wrap()`, the single point of truth used both at construction and at every
+`kupdate()`:
+
+```{r, error = TRUE}
+se_kernel(length_scale = -1)
+kupdate(se_kernel(length_scale = 1), length_scale = -1)
+```
+
+### `softplus_parametrisation()`: an alternative for positive values
+
+A gentler gradient near zero -- swap it in for any positive hyperparameter:
+
+```{r}
+k_softplus <- se_kernel(
+  length_scale = 1,
+  length_scale_parametrisation = softplus_parametrisation()
+)
+get_params(k_softplus) # same constrained value...
+k_softplus$length_scale$wrapped # ...but a different unconstrained representation
+k$length_scale$wrapped
+```
+
+### `bounded_parametrisation()`: for a value confined to an interval
+
+Useful for a hyperparameter that must stay strictly within `(lower, upper)`,
+e.g. a correlation-like quantity:
+
+```{r}
+k_bounded <- se_kernel(
+  length_scale = 1,
+  length_scale_parametrisation = bounded_parametrisation(lower = 0, upper = 10)
+)
+get_params(k_bounded)
+```
+
+```{r, error = TRUE}
+kupdate(k_bounded, length_scale = 20) # outside (0, 10)
+```
+
+### `identity_parametrisation()`: no constraint at all
+
+For a hyperparameter that may take any real value (this is the default for
+`affine_kernel()`'s `offset` and `polynomial_kernel()`'s `constant`, which
+are plain unconstrained fields rather than `wrapped_param`s):
+
+```{r}
+identity_parametrisation()
+wrap(identity_parametrisation(), -3.5)
+```
+
+### `parametrisation_chain()`: composing constraints
+
+Chains several parametrisations together, e.g. positive *and* bounded
+above:
+
+```{r}
+chain <- parametrisation_chain(log_exp_parametrisation())
+unwrap(chain, wrap(chain, 2))
+```
+
+## Distance functions
+
+Stationary and dot-product kernels delegate to a `distance_function`. Every
+kernel has a sensible default (e.g. squared Euclidean for `se_kernel()`),
+but you can swap it for any of the alternatives `keRnel` provides:
+
+```{r}
+euclidean_distance(c(0, 0), c(3, 4))
+manhattan_distance(c(0, 0), c(3, 4))
+chebyshev_distance(c(0, 0), c(3, 4))
+cosine_distance(c(1, 0), c(0, 1))
+minkowski_distance(c(0, 0), c(3, 4), p = 3)
+hamming_distance(c(1, 2, 3), c(1, 0, 3))
+canberra_distance(c(1, 2), c(2, 1))
+```
+
+As a convenience, you can pass a string shortcut instead of the function
+itself:
+
+```{r}
+k_manhattan <- se_kernel(length_scale = 1, distance_function = "manhattan")
+k_manhattan$distance_function
+identical(k_manhattan$distance_function, manhattan_distance)
+```
+
+You can also write your own distance function -- any function of two
+numeric vectors returning a single value works (it just won't benefit from
+`keRnel`'s internal vectorised fast paths, see `vignette("c-expert")`):
+
+```{r}
+my_distance <- function(x1, x2) sum((x1 - x2)^2) / 2
+k_custom_distance <- se_kernel(length_scale = 1, distance_function = my_distance)
+evaluate(k_custom_distance, c(0, 1, 2))
+```
+
+## Exponential and logarithm wrappers
+
+`exp_kernel()`/`log_kernel()` apply `exp()`/`log()` to another kernel's
+result -- e.g. useful to guarantee strict positivity of an otherwise
+unconstrained combination:
+
+```{r}
+k_exp <- exp_kernel(se_kernel(length_scale = 1))
+evaluate(k_exp, c(0, 1, 2))
+```
+
+```{r}
+identical(
+  evaluate(log_kernel(exp_kernel(se_kernel(length_scale = 1))), c(0, 1, 2)),
+  evaluate(se_kernel(length_scale = 1), c(0, 1, 2))
+)
+```
+
+## Combinatorial helper: `kernel_interactions()`
+
+For additive-with-interactions GP models, manually writing out every
+sum/product term gets tedious quickly. `kernel_interactions()` builds the
+full expansion automatically:
+
+```{r}
+k1 <- se_kernel(length_scale = 1)
+k2 <- linear_kernel(slope_var = 1)
+k3 <- periodic_kernel(length_scale = 1, period = 2)
+
+k_full <- kernel_interactions(list(k1, k2, k3))
+k_full # k1 + k2 + k3 + k1*k2 + k1*k3 + k2*k3 + k1*k2*k3
+```
+
+Limit the expansion to lower-order interactions with `max_order`:
+
+```{r}
+k_pairwise_only <- kernel_interactions(list(k1, k2, k3), max_order = 2)
+k_pairwise_only # no triple product k1*k2*k3
+```
+
+## Selecting input dimensions: `active_dims_kernel()`
+
+Restrict a kernel to a subset of input dimensions -- useful to build an
+additive kernel over different (possibly overlapping) groups of features:
+
+```{r}
+X <- matrix(c(
+  0, 10,
+  1, 11,
+  2, 12
+), ncol = 2, byrow = TRUE)
+
+k_dim1 <- active_dims_kernel(se_kernel(length_scale = 1), active_dims = 1)
+evaluate(k_dim1, X) # only column 1 (0, 1, 2) is seen
+
+k_dim2 <- active_dims_kernel(se_kernel(length_scale = 1), active_dims = 2)
+evaluate(k_dim2, X) # only column 2 (10, 11, 12) is seen
+```
+
+Combine with `+` for a fully additive kernel across dimensions:
+
+```{r}
+k_additive <- active_dims_kernel(se_kernel(length_scale = 1), active_dims = 1) +
+  active_dims_kernel(matern32_kernel(length_scale = 1), active_dims = 2)
+evaluate(k_additive, X)
+```
+
+## Automatic Relevance Determination: `ard_kernel()`
+
+ARD gives every input dimension its own `length_scale`, so the model can
+learn that some features matter more than others:
+
+```{r}
+k_ard <- ard_kernel(se_kernel, length_scales = c(1, 5, 0.1))
+X3 <- matrix(rnorm(9), ncol = 3)
+dim(evaluate(k_ard, X3))
+```
+
+`ard_kernel()` takes a **constructor** function (not a pre-built instance)
+and handles construction and freezing itself, so there is no way to build
+it incorrectly:
+
+```{r}
+k_ard$subkernels[[1]]$length_scale # always exactly 1...
+k_ard$subkernels[[1]]$length_scale$frozen # ...and always frozen
+get_trainable_params(k_ard) # only length_scales is trainable
+```
+
+Extra constructor arguments pass through via `...`:
+
+```{r}
+k_ard_periodic <- ard_kernel(periodic_kernel, length_scales = c(1, 2), period = 5)
+k_ard_periodic$subkernels[[1]]$period
+```
+
+## Random initialisation: `sample_hps()`
+
+For multi-start optimisation, you often want several random initial
+configurations. `sample_hps()` resamples named hyperparameters from a
+prior, anywhere they occur in the kernel tree:
+
+```{r}
+set.seed(123)
+k <- se_kernel(length_scale = 1) + white_noise_kernel(noise = 0.1)
+
+k_sampled <- sample_hps(k, priors = list(
+  length_scale = c(0.1, 10), # c(min, max) for the default uniform prior
+  noise = c(0.001, 1)
+))
+get_params(k_sampled)
+```
+
+Normal priors are supported via `distribution = stats::rnorm` (then
+`priors` holds `c(mean, sd)` instead of `c(min, max)`):
+
+```{r}
+k_sampled_normal <- sample_hps(
+  se_kernel(length_scale = 1),
+  priors = list(length_scale = c(2, 0.5)),
+  distribution = stats::rnorm
+)
+get_params(k_sampled_normal)
+```
+
+Frozen hyperparameters are skipped, consistent with `get_trainable_params()`:
+
+```{r}
+k_frozen <- freeze(se_kernel(length_scale = 1), "length_scale")
+identical(
+  get_params(k_frozen),
+  get_params(sample_hps(k_frozen, priors = list(length_scale = c(0.1, 10))))
+)
+```
+
+::: {.alert .alert-info}
+`sample_hps()` draws from R's ambient RNG state, so call `set.seed()`
+beforehand for reproducibility, the standard R convention.
+:::
+
+## NA handling, revisited: `na_action = "mask"`
+
+`vignette("a-beginner")` showed the default `na_action = "propagate"`. For
+GP fitting, you often need the covariance matrix to stay invertible despite
+missing data -- `na_action = "mask"` treats a missing point as an
+independent observation of variance `mask_variance` (`1` by default),
+preserving positive-definiteness:
+
+```{r}
+k <- se_kernel(length_scale = 1)
+evaluate(k, c(0, NA, 2), na_action = "mask")
+```
+
+Compare with the default:
+
+```{r}
+evaluate(k, c(0, NA, 2)) # na_action = "propagate" (the default)
+```
+
+`mask_variance` is adjustable, e.g. to match the scale of the data's own
+noise:
+
+```{r}
+evaluate(k, c(0, NA, 2), na_action = "mask", mask_variance = 0.01)
+```
+
+`na_action`/`mask_variance` are forwarded automatically through any
+composition of kernels:
+
+```{r}
+k_composite <- se_kernel(length_scale = 1) + white_noise_kernel(noise = 0.1)
+evaluate(k_composite, c(0, NA, 2), na_action = "mask")
+```
+
+## Writing your own kernel
+
+Every base kernel constructor follows the same recipe. Here is a minimal
+custom stationary kernel (a slightly unusual "cosine" kernel), to show the
+pattern end to end:
+
+```{r}
+cosine_kernel <- function(length_scale,
+                           length_scale_parametrisation = log_exp_parametrisation(),
+                           distance_function = euclidean_distance,
+                           engine = dense_engine()) {
+  kernel <- structure(
+    list(
+      length_scale = wrapped_param(length_scale, length_scale_parametrisation),
+      distance_function = resolve_distance_function(distance_function),
+      engine = engine
+    ),
+    class = c("cosine_kernel", "stationary_kernel", "kernel")
+  )
+  validate_kernel(kernel)
+  kernel
+}
+
+# pairwise() defines the formula at the level of a single pair of points --
+# the always-correct reference, exercised directly in tests.
+pairwise.cosine_kernel <- function(kernel, x1, x2) {
+  d <- kernel$distance_function(x1, x2)
+  cos(d / unwrap_param(kernel$length_scale))
+}
+
+k_cosine <- cosine_kernel(length_scale = 1)
+evaluate(k_cosine, c(0, 1, 2))
+```
+
+This already works end to end: `evaluate()`, `get_params()`, `kupdate()`,
+`freeze()`, printing, and composition via `+`/`*` all work immediately,
+because they only depend on the generic `$length_scale`/`$distance_function`
+structure, not on anything specific to `cosine_kernel`:
+
+```{r}
+k_cosine + white_noise_kernel(noise = 0.1)
+kupdate(k_cosine, length_scale = 3)
+get_params(freeze(k_cosine, "length_scale"))
+```
+
+`vignette("c-expert")` shows how to additionally give a custom stationary
+kernel a fast, vectorised `evaluate()` (rather than the always-correct but
+slower default), by providing a `shape()` method.
+
+## Where to go next
+
+`vignette("c-expert")`: computation engines (`dense_engine()`,
+`diagonal_engine()`), the internal vectorisation machinery, `batch_kernel()`,
+`input_specific_param_kernel()`, `block_kernel()`, and `block_diag_kernel()`.

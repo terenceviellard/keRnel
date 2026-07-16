@@ -1,0 +1,87 @@
+template:
+  bootstrap: 5
+
+articles:
+  - title: Learn keRnel
+    navbar: ~
+    contents:
+      - a-beginner
+      - b-intermediate
+      - c-expert
+
+reference:
+  - title: Stationary kernels
+    contents:
+      - se_kernel
+      - matern_kernels
+      - periodic_kernel
+      - rational_quadratic_kernel
+      - white_noise_kernel
+      - feature_kernel
+
+  - title: Dot-product kernels
+    contents:
+      - linear_kernel
+      - affine_kernel
+      - polynomial_kernel
+      - sigmoid_kernel
+
+  - title: Other kernels
+    contents:
+      - constant_kernel
+      - variance_kernel
+
+  - title: Operators and wrappers
+    desc: Combine and transform kernels.
+    contents:
+      - sum_kernel
+      - product_kernel
+      - kernel_arithmetic
+      - exp_kernel
+      - log_kernel
+      - kernel_interactions
+      - active_dims_kernel
+      - ard_kernel
+      - batch_kernel
+      - input_specific_param_kernel
+      - block_diag_kernel
+      - block_kernel
+
+  - title: Evaluating a kernel
+    contents:
+      - evaluate
+      - pairwise
+      - engine
+      - dense_engine
+      - diagonal_engine
+      - shape
+
+  - title: Hyperparameters
+    desc: Inspecting, updating, freezing, and sampling a kernel's hyperparameters.
+    contents:
+      - wrapped_param
+      - unwrap_param
+      - get_params
+      - get_trainable_params
+      - kupdate
+      - freeze
+      - sample_hps
+
+  - title: Parametrisations
+    desc: Controlling how a hyperparameter is constrained.
+    contents:
+      - parametrisation
+      - identity_parametrisation
+      - log_exp_parametrisation
+      - softplus_parametrisation
+      - bounded_parametrisation
+      - parametrisation_chain
+
+  - title: Distances
+    contents:
+      - distances
+      - resolve_distance_function
+
+  - title: Writing a custom kernel
+    contents:
+      - validate_kernel

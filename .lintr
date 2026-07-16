@@ -1,0 +1,9 @@
+linters: linters_with_defaults(
+    object_name_linter = NULL,
+    object_length_linter = NULL,
+    line_length_linter = line_length_linter(130L),
+    indentation_linter = NULL,
+    commented_code_linter = NULL,
+    object_usage_linter = NULL
+  )
+exclusions: list("dev", "objectifs")

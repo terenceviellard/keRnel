@@ -1,0 +1,405 @@
+---
+title: "4. Batching: one kernel, many configurations"
+subtitle: "Batched hyperparameters, batched inputs, nested batches, per-point noise, and what they mean for a Gaussian Process"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{4. Batching: one kernel, many configurations}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4.5
+)
+set.seed(42)
+```
+
+```{r setup}
+library(keRnel)
+```
+
+This vignette assumes you are comfortable with the material of the beginner
+and intermediate vignettes (`vignette("a-beginner")`,
+`vignette("b-intermediate")`): building kernels, `evaluate()`,
+`get_params()`/`kupdate()`/`freeze()`.
+
+## Why batching? One prior is rarely enough
+
+A Gaussian Process prior is entirely determined by its kernel and the
+kernel's hyperparameters:
+
+$$f \sim \mathcal{GP}\big(0,\; k_\theta(x, x')\big)$$
+
+In practice you almost never work with a *single* $\theta$. You compare a
+grid of candidate length-scales, you restart an optimiser from several
+initial values, you fit the same model to several subjects, you give every
+observation its own noise level. All of these are the same computational
+pattern: **evaluate one kernel under a family of configurations**
+$\{\theta_1, \ldots, \theta_B\}$, against shared or per-configuration
+inputs.
+
+You could write that as a loop. `batch_kernel()` instead makes the family
+itself a kernel object: build the inner kernel with a *vector* of
+hyperparameter values (one per batch element) and `evaluate()` returns all
+$B$ covariance matrices at once, stacked along a trailing dimension.
+
+## Batching over hyperparameters: what does a length-scale do?
+
+The squared-exponential kernel is
+
+$$k_\ell(x, x') = \exp\!\left(-\frac{(x - x')^2}{2\ell^2}\right),$$
+
+where the length-scale $\ell$ controls how far apart two points can be
+while remaining correlated. To *see* what $\ell$ does, evaluate the same
+kernel under three values of it at once:
+
+```{r}
+x <- seq(0, 10, length.out = 200)
+
+k <- batch_kernel(
+  se_kernel(length_scale = c(0.3, 1, 3)),
+  batch_size = 3
+)
+
+K <- evaluate(k, x, memory_warning_threshold = Inf)
+dim(K)
+```
+
+The result is an array of shape `(n, n, batch_size)`: `K[, , b]` is the
+covariance matrix of the GP prior with the `b`-th length-scale. A draw from
+that prior is $f = L z$ with $L L^\top = K$ and $z \sim \mathcal{N}(0, I)$:
+
+```{r}
+sample_gp_prior <- function(K, n_draws = 2) {
+  L <- t(chol(K + diag(1e-9, nrow(K)))) # jitter for numerical stability
+  L %*% matrix(rnorm(nrow(K) * n_draws), nrow(K), n_draws)
+}
+
+ls_values <- c(0.3, 1, 3)
+draws <- lapply(1:3, function(b) sample_gp_prior(K[, , b]))
+
+matplot(x, do.call(cbind, draws),
+        type = "l", lty = rep(1:2, times = 3), lwd = 1.5,
+        col = rep(c("#D55E00", "#0072B2", "#009E73"), each = 2),
+        xlab = "x", ylab = "f(x)",
+        main = "GP prior draws under three length-scales, one batched kernel")
+legend("topright", bty = "n", lwd = 1.5,
+       col = c("#D55E00", "#0072B2", "#009E73"),
+       legend = paste("length_scale =", ls_values))
+```
+
+Small $\ell$ wiggles fast, large $\ell$ produces slowly-varying, almost
+linear functions -- and all three covariance matrices came from a *single*
+`evaluate()` call on a single kernel object.
+
+A hyperparameter left as a single scalar is shared across every batch
+element. This is how you batch only *part* of a kernel:
+
+```{r}
+# Three noise levels, one shared length-scale:
+k_mixed <- batch_kernel(
+  se_kernel(length_scale = 1) + white_noise_kernel(noise = c(0.01, 0.1, 1)),
+  batch_size = 3
+)
+K_mixed <- evaluate(k_mixed, c(0, 1, 2))
+# The diagonal (signal variance 1 + noise) changes; off-diagonals don't:
+sapply(1:3, function(b) K_mixed[1, 1, b])
+sapply(1:3, function(b) K_mixed[1, 2, b])
+```
+
+In GP terms this is the *signal-plus-noise* decomposition
+$k(x, x') = k_{\mathrm{SE}}(x, x') + \sigma_b^2 \, \delta_{x = x'}$ with a
+per-configuration noise variance $\sigma_b^2$ -- the exact structure you
+sweep when profiling a noise level.
+
+## Batching over inputs: same prior, several datasets
+
+The dual situation: one set of hyperparameters, but $B$ different input
+sets -- say, $B$ subjects observed at different times, all sharing the same
+GP prior. Pass `batch_over_inputs = TRUE` and give `evaluate()` a 3-D array
+of shape `(batch_size, n_points, n_dims)`:
+
+```{r}
+k_shared <- batch_kernel(se_kernel(length_scale = 1),
+                         batch_size = 2, batch_over_inputs = TRUE)
+
+x_subjects <- array(0, dim = c(2, 4, 1))
+x_subjects[1, , 1] <- c(0.0, 0.5, 1.0, 1.5)  # subject 1's design
+x_subjects[2, , 1] <- c(0.0, 2.0, 4.0, 6.0)  # subject 2's design
+
+K_subjects <- evaluate(k_shared, x_subjects)
+dim(K_subjects)
+# Subject 2's points are further apart => weaker correlations:
+K_subjects[1, 2, 1] # subjects 1: k(0, 0.5)
+K_subjects[1, 2, 2] # subjects 2: k(0, 2)
+```
+
+Both flavours combine freely: batched inputs *and* per-batch
+hyperparameters give each subject its own design and its own
+hyperparameter values -- a fully independent-subjects model evaluated in
+one call.
+
+## The axis contract: declaring what varies
+
+So far, `batch_kernel()` *auto-detected* which hyperparameter was batched:
+any multi-valued hyperparameter is assumed to vary along the batch axis,
+and must then have exactly `batch_size` values. The validation is strict on
+purpose -- a mismatched length is an error at construction, never a silent
+recycling:
+
+```{r, error = TRUE}
+batch_kernel(se_kernel(length_scale = c(1, 2, 3)), batch_size = 5)
+```
+
+But "this vector has several values" does not always mean "one value per
+batch element". The clearest counter-example is [ard_kernel()], whose
+`length_scales` has one value per *input dimension*:
+
+$$k_{\mathrm{ARD}}(x, x') = k\!\left(\frac{x_1}{\ell_1}, \ldots, \frac{x_D}{\ell_D};\;
+\frac{x'_1}{\ell_1}, \ldots, \frac{x'_D}{\ell_D}\right)$$
+
+Those $D$ values index dimensions, never batch elements -- even when $D$
+happens to equal `batch_size`. `keRnel` encodes that distinction on the
+parameter itself (`wrapped_param(..., sliceable = FALSE)`), so an ARD
+kernel inside a batch is never mis-sliced, coincidence or not:
+
+```{r}
+ard <- ard_kernel(se_kernel, length_scales = c(1, 2, 3)) # 3 input dimensions
+bk <- batch_kernel(ard, batch_size = 3)                  # batch of 3: no clash
+
+X <- matrix(rnorm(12), ncol = 3)
+K_ard <- evaluate(bk, X)
+# Nothing was batched, so all three matrices are the full ARD kernel:
+all.equal(K_ard[, , 1], evaluate(ard, X))
+```
+
+When auto-detection *is* ambiguous, name the batched hyperparameters
+explicitly with `batch_axes`. A multi-valued hyperparameter **not** named
+there is left alone -- it belongs to some other wrapper's axis. That rule
+is what makes nested batching work.
+
+## Nested batching: a grid over two hyperparameters
+
+Suppose you want to explore a full grid: 2 candidate length-scales
+$\times$ 4 candidate noise levels, i.e. the 8 kernels
+
+$$k_{i,o}(x, x') = \exp\!\left(-\frac{(x-x')^2}{2\ell_i^2}\right)
+                  + \sigma_o^2\, \delta_{x = x'},
+  \qquad i \in \{1, 2\},\; o \in \{1, \ldots, 4\}.$$
+
+Wrap a `batch_kernel()` inside another one, and give each level its own
+axis:
+
+```{r}
+k <- se_kernel(length_scale = c(0.5, 1.5)) +
+     white_noise_kernel(noise = c(0.5, 1, 2, 3))
+
+inner <- batch_kernel(k, batch_size = 2, batch_axes = "length_scale")
+grid  <- batch_kernel(inner, batch_size = 4, batch_axes = "noise")
+
+K_grid <- evaluate(grid, c(1, 2, 3))
+dim(K_grid) # (n, n, inner batch, outer batch)
+```
+
+`K_grid[, , i, o]` is exactly $k_{i,o}$'s covariance matrix. Two structural
+checks make the "each level owns its axis" guarantee visible -- the
+diagonal only responds to the *outer* (noise) axis, the off-diagonal only
+to the *inner* (length-scale) one:
+
+```{r}
+# Diagonal = 1 + noise, whatever the length-scale:
+sapply(1:4, function(o) K_grid[1, 1, 1, o])
+sapply(1:4, function(o) K_grid[1, 1, 2, o])
+
+# Off-diagonal = exp(-d^2 / (2 l^2)), whatever the noise:
+K_grid[1, 2, 1, 1] - exp(-2)     # l = 0.5, d = 1
+K_grid[1, 2, 2, 1] - exp(-2 / 9) # l = 1.5, d = 1
+```
+
+(Readers coming from the Python sibling library `kernax` will recognise
+this example: it is the same two-level batch as its
+`test_double_batch_with_masks`, with the same reference values -- the two
+libraries produce the same grid, modulo R's convention of putting batch
+dimensions last.)
+
+If you forget to declare the axes, nothing silently breaks -- construction
+fails loudly, telling you which lengths clashed and to use `batch_axes`:
+
+```{r, error = TRUE}
+batch_kernel(k, batch_size = 2)
+```
+
+## Per-point hyperparameters: heteroscedastic noise
+
+Batching varies a hyperparameter *across covariance matrices*.
+[input_specific_param_kernel()] varies one *within* a single matrix, along
+the points of `x1`. Its canonical use is heteroscedastic regression, where
+observation $i$ has its own noise variance $\sigma_i^2$:
+
+$$y_i = f(x_i) + \varepsilon_i, \qquad
+  \varepsilon_i \sim \mathcal{N}(0, \sigma_i^2)
+  \quad\Longrightarrow\quad
+  \mathbf{K}_y = \mathbf{K}_f + \mathrm{diag}(\sigma_1^2, \ldots, \sigma_n^2).$$
+
+```{r}
+x_obs <- c(1, 3, 5, 7, 9)
+sigma2 <- c(0.01, 0.01, 1.5, 0.01, 0.01) # the third point is much noisier
+
+k_y <- se_kernel(length_scale = 1.2) +
+  input_specific_param_kernel(white_noise_kernel(noise = sigma2),
+                              input_size = 5)
+
+K_y <- evaluate(k_y, x_obs)
+diag(K_y) # 1 + sigma_i^2, point by point
+```
+
+The GP posterior mean at new points $x_*$ is
+$\mu_* = \mathbf{K}_*^\top \mathbf{K}_y^{-1} y$, and the noisy point simply
+counts for less:
+
+```{r}
+y_obs <- sin(x_obs)
+x_new <- seq(0, 10, length.out = 100)
+
+k_f <- se_kernel(length_scale = 1.2)
+K_star <- evaluate(k_f, x_obs, x_new)
+K_new_diag <- rep(1, length(x_new)) # k(x, x) = 1 for the SE kernel
+
+alpha <- solve(K_y, y_obs)
+post_mean <- drop(crossprod(K_star, alpha))
+post_var <- pmax(K_new_diag - colSums(K_star * solve(K_y, K_star)), 0)
+
+plot(x_new, post_mean, type = "l", lwd = 2, col = "#0072B2",
+     ylim = range(post_mean + 2 * sqrt(post_var),
+                  post_mean - 2 * sqrt(post_var), y_obs),
+     xlab = "x", ylab = "f(x)",
+     main = "Heteroscedastic GP: the noisy point (x = 5) is trusted less")
+polygon(c(x_new, rev(x_new)),
+        c(post_mean + 2 * sqrt(post_var), rev(post_mean - 2 * sqrt(post_var))),
+        col = adjustcolor("#0072B2", alpha.f = 0.15), border = NA)
+points(x_obs, y_obs, pch = 19,
+       col = ifelse(sigma2 > 1, "#D55E00", "black"), cex = 1.2)
+```
+
+Note the posterior mean does not bend to pass through the orange (noisy)
+point, and the uncertainty band barely narrows there.
+
+**A caveat that matters mathematically**: entry $(i, j)$ of this wrapper's
+auto-covariance uses point $i$'s value and entry $(j, i)$ uses point
+$j$'s. The result is only a symmetric, valid covariance matrix when the
+varied hyperparameter acts on the *diagonal only* -- which is exactly why
+`white_noise_kernel()`'s `noise` is its canonical use. Varying, say, a
+`length_scale` per point would produce an asymmetric matrix: no longer a
+GP covariance.
+
+## Missing data across structured kernels
+
+The intermediate vignette introduced `na_action = "mask"`: a point with a
+missing value is treated as an independent pseudo-observation of variance
+`mask_variance`, keeping $\mathbf{K}$ invertible. That promise requires
+knowing *which entries are the self-variances of the masked point* -- a
+question that only makes sense for the matrix the **user** asked for, not
+for the internal slices a structured kernel evaluates along the way (a
+single row of `x1`, one block of a block matrix...).
+
+`keRnel` therefore decides "is this a self-covariance?" once, at the level
+of your call, and forwards the answer through every internal
+re-evaluation. The result: masking behaves identically however deeply the
+kernel is structured.
+
+```{r}
+x_na <- c(0, NA, 2)
+
+# Through a per-point-noise wrapper: the masked point keeps its unit
+# self-variance, the matrix stays invertible...
+k_het <- input_specific_param_kernel(white_noise_kernel(noise = c(.1, .5, .2)),
+                                     input_size = 3)
+K_masked <- evaluate(k_het, x_na, na_action = "mask")
+K_masked
+chol(K_masked)[1, 1] # factorisation succeeds: the matrix is usable
+```
+
+```{r}
+# ...and through a batch, every batch element gets the same treatment:
+k_b <- batch_kernel(se_kernel(length_scale = c(1, 2)), batch_size = 2)
+K_b <- evaluate(k_b, x_na, na_action = "mask")
+K_b[, , 1]
+```
+
+For a *block* kernel (below), there is one more subtlety, handled for you:
+the diagonal blocks of a self-covariance are self-covariances, but a
+*cross* block covaries two different processes -- there, a masked point
+contributes `0`, never a self-variance.
+
+## Multi-output GPs: block kernels
+
+A two-output GP stacks outputs into one covariance matrix of blocks:
+
+$$\mathbf{K} = \begin{pmatrix}
+  \mathbf{K}_{11} & \mathbf{K}_{12} \\
+  \mathbf{K}_{12}^\top & \mathbf{K}_{22}
+\end{pmatrix},$$
+
+where $\mathbf{K}_{bb'}$ covaries output $b$ with output $b'$. Computing a
+cross block needs *both* blocks' hyperparameter values at once, so the
+inner kernel must be designed for pairs -- [feature_kernel()] is the
+built-in prototype (kernels not marked block-compatible are rejected
+rather than silently misused):
+
+```{r}
+inner <- feature_kernel(length_scale = c(1, 3), length_scale_u = 1,
+                        variance = c(2, 1))
+k_mo <- block_kernel(inner, nb_blocks = 2)
+K_mo <- evaluate(k_mo, c(0, 1, 2))
+round(K_mo, 3)
+```
+
+The off-diagonal $3 \times 3$ blocks are the cross-covariances between the
+two outputs: non-zero (the outputs are correlated), and the transpose of
+each other (the matrix stays symmetric). With `na_action = "mask"`, a
+missing point receives `mask_variance` in each *diagonal* block only:
+
+```{r}
+K_mo_na <- evaluate(k_mo, c(0, NA, 2), na_action = "mask")
+K_mo_na[2, c(2, 5)] # own-block diagonal: masked; cross block: 0
+```
+
+## Batching and training configurations
+
+Batching composes with the training toolkit from the intermediate
+vignette, because slicing only ever touches values -- `frozen` flags and
+parametrisations travel with each slice untouched:
+
+```{r}
+k_train <- batch_kernel(
+  se_kernel(length_scale = c(0.5, 1, 2)) + white_noise_kernel(noise = 0.1),
+  batch_size = 3
+)
+k_train <- freeze(k_train, "noise")
+
+get_trainable_params(k_train) # the 3 batched length-scales; noise excluded
+```
+
+A typical multi-start workflow draws candidate starting values with
+`sample_hps()`, packs them into one batched kernel, and evaluates every
+candidate's covariance in a single call -- the batched analogue of
+restarting an optimiser $B$ times.
+
+Finally, the axis contract is re-checked at every `evaluate()`, so a
+later `kupdate()` cannot silently desynchronise a batch:
+
+```{r, error = TRUE}
+k_drift <- kupdate(k_train, length_scale = c(1, 2)) # 2 values, batch of 3
+evaluate(k_drift, c(0, 1))
+```
+
+## Where to go next
+
+- `?batch_kernel`, `?input_specific_param_kernel`, `?block_kernel` for the
+  full contracts (including `batch_axes`/`param_axes`/`block_axes`).
+- `vignette("c-expert")` for writing your own kernels -- any custom kernel
+  built from `wrapped_param()`s gets batching support for free.

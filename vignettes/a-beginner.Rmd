@@ -1,0 +1,224 @@
+---
+title: "1. Getting Started with keRnel (Beginner)"
+subtitle: "Every base kernel, printing, evaluation, missing data, and basic composition"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{1. Getting Started with keRnel (Beginner)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(keRnel)
+```
+
+## What is a covariance kernel?
+
+A covariance kernel is a function `k(x1, x2)` that measures how "similar"
+two input points are. Gaussian Process models use a kernel to build a
+covariance matrix over a set of points: how correlated two outputs are
+depends on how similar their inputs are, according to the kernel.
+
+`keRnel` provides a large catalogue of kernels, all sharing the exact same
+interface:
+
+```{r}
+k <- se_kernel(length_scale = 1)
+k
+```
+
+Every kernel is built by a constructor function (`se_kernel()` above), and
+every kernel can be evaluated on a set of points with `evaluate()`:
+
+```{r}
+evaluate(k, c(0, 1, 2))
+```
+
+The result is the 3x3 covariance matrix between the three points `0`, `1`,
+and `2`. Notice the diagonal is always `1` here: a point is always
+maximally similar to itself for this kernel.
+
+If you only pass one set of points, `evaluate()` computes the matrix of a
+point set against itself (the common "auto-covariance" case for fitting a
+GP). You can also pass two different sets of points to get a *cross*-
+covariance matrix:
+
+```{r}
+evaluate(k, c(0, 1), c(0, 10, 20))
+```
+
+The result has 2 rows (length of the first argument) and 3 columns (length
+of the second).
+
+## Printing a kernel
+
+Every kernel prints its hyperparameters in their natural, constrained
+space (e.g. `length_scale` is always shown positive, never in whatever
+internal representation is used for optimisation):
+
+```{r}
+print(k)
+matern32_kernel(length_scale = 2.5)
+periodic_kernel(length_scale = 1, period = 7)
+```
+
+## Multi-dimensional inputs
+
+A bare numeric vector like `c(0, 1, 2)` is always interpreted as **N points
+of 1 dimension** -- never as a single point of N dimensions. For points
+with more than one dimension, pass a matrix instead, one row per point:
+
+```{r}
+X <- matrix(c(
+  0, 0,
+  1, 0,
+  0, 1
+), ncol = 2, byrow = TRUE)
+X
+evaluate(k, X)
+```
+
+::: {.alert .alert-info}
+**Sharp bit**: if you want to evaluate a kernel at a *single*
+multi-dimensional point, you must still pass it as a 1-row matrix
+(`matrix(c(1, 2), nrow = 1)`), not as a bare vector `c(1, 2)` -- the latter
+is read as 2 points of 1 dimension each.
+:::
+
+## The full catalogue of base kernels
+
+Every base kernel constructor validates its hyperparameters and gives a
+sensible error if you pass something invalid (e.g. a non-positive
+`length_scale`):
+
+```{r, error = TRUE}
+keRnel::se_kernel(length_scale = 1)
+```
+
+### Stationary kernels (depend only on the distance between points)
+
+```{r}
+# Squared Exponential / RBF (rbf_kernel is an alias)
+evaluate(se_kernel(length_scale = 1), c(0, 1, 2))
+
+# Matern family (increasing smoothness: 1/2, 3/2, 5/2)
+evaluate(matern12_kernel(length_scale = 1), c(0, 1, 2))
+evaluate(matern32_kernel(length_scale = 1), c(0, 1, 2))
+evaluate(matern52_kernel(length_scale = 1), c(0, 1, 2))
+
+# Periodic
+evaluate(periodic_kernel(length_scale = 1, period = 2), c(0, 1, 2))
+
+# Rational Quadratic
+evaluate(rational_quadratic_kernel(length_scale = 1, alpha = 2), c(0, 1, 2))
+
+# White noise: non-zero only on the diagonal (x1 == x2)
+evaluate(white_noise_kernel(noise = 0.1), c(0, 1, 2))
+
+# Feature kernel: a more advanced 2-channel kernel, see the expert vignette
+# for its use with block_kernel()
+evaluate(feature_kernel(length_scale = 1, length_scale_u = 1, variance = 1), c(0, 1, 2))
+```
+
+### Dot-product kernels (depend on the dot product between points)
+
+```{r}
+# Linear: passes through the origin
+evaluate(linear_kernel(slope_var = 1), c(0, 1, 2))
+
+# Affine: passes through (offset, 0) instead of the origin
+evaluate(affine_kernel(slope_var = 1, offset = 1), c(0, 1, 2))
+
+# Polynomial
+evaluate(polynomial_kernel(degree = 2, gamma = 1, constant = 1), c(0, 1, 2))
+
+# Sigmoid (hyperbolic tangent)
+evaluate(sigmoid_kernel(alpha = 0.5, constant = 0), c(0, 1, 2))
+```
+
+### Other kernels (no notion of distance at all)
+
+```{r}
+# Constant: the same value everywhere, can be negative
+evaluate(constant_kernel(value = 2), c(0, 1, 2))
+
+# Variance: the same strictly positive value everywhere, typically used to
+# scale another kernel (see "Combining kernels" below)
+evaluate(variance_kernel(variance = 3), c(0, 1, 2))
+```
+
+## Combining kernels with `+` and `*`
+
+Kernels combine just like numbers, using `+` and `*`:
+
+```{r}
+k_sum <- se_kernel(length_scale = 1) + white_noise_kernel(noise = 0.1)
+k_sum
+evaluate(k_sum, c(0, 1, 2))
+```
+
+```{r}
+k_product <- variance_kernel(variance = 4) * se_kernel(length_scale = 1)
+k_product
+evaluate(k_product, c(0, 1, 2))
+```
+
+A bare number on either side of `+`/`*` is automatically treated as a
+`constant_kernel()`:
+
+```{r}
+k_plus_constant <- se_kernel(length_scale = 1) + 0.5
+k_plus_constant
+```
+
+You can chain as many `+`/`*` as you like:
+
+```{r}
+k_chain <- se_kernel(length_scale = 1) * variance_kernel(variance = 2) +
+  white_noise_kernel(noise = 0.05)
+k_chain
+```
+
+::: {.alert .alert-info}
+**Sharp bit**: unlike many other GP libraries, `keRnel` deliberately does
+**not** support `-` (subtraction) or unary negation (`-k`) for kernels --
+subtracting covariance kernels is rarely mathematically meaningful (it can
+easily break positive semi-definiteness) and was judged unnecessary.
+:::
+
+```{r, error = TRUE}
+se_kernel(length_scale = 1) - white_noise_kernel(noise = 0.1)
+```
+
+## Missing data: the default behaviour
+
+Real datasets often have missing values. By default, a missing input point
+(`NA`) makes the corresponding row/column of the result `NA` too:
+
+```{r}
+evaluate(se_kernel(length_scale = 1), c(0, NA, 2))
+```
+
+This is deliberately the safest default: it forces you to notice and
+decide what to do about missing data, rather than silently producing a
+matrix that looks fine but secretly is not invertible. The intermediate
+vignette (`vignette("b-intermediate")`) shows `na_action = "mask"`, an
+alternative that keeps the matrix invertible.
+
+## Where to go next
+
+- `vignette("b-intermediate")`: hyperparameter introspection
+  (`get_params()`), immutable updates (`kupdate()`), freezing parameters
+  for optimisation (`freeze()`), parametrisations, custom distance
+  functions, `active_dims_kernel()`, `ard_kernel()`, `sample_hps()`, and
+  writing your own kernel.
+- `vignette("c-expert")`: computation engines, performance internals,
+  `batch_kernel()`, `input_specific_param_kernel()`, `block_kernel()`, and
+  `block_diag_kernel()`.
