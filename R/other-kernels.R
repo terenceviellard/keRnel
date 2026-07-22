@@ -45,6 +45,18 @@ pairwise_matrix.constant_kernel <- function(kernel, X1, X2) {
   matrix(unwrap_param(kernel$value), nrow = nrow(X1), ncol = nrow(X2))
 }
 
+#' @keywords internal
+#' @exportS3Method
+pairwise_matrix_grad.constant_kernel <- function(kernel, X1, X2) {
+  list(value = matrix(1, nrow = nrow(X1), ncol = nrow(X2)))
+}
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_diag_grad.constant_kernel <- function(kernel, X1, X2) {
+  list(value = rep(1, nrow(X1)))
+}
+
 #' Variance kernel
 #'
 #' @description
@@ -87,4 +99,16 @@ pairwise.variance_kernel <- function(kernel, x1, x2) {
 #' @exportS3Method
 pairwise_matrix.variance_kernel <- function(kernel, X1, X2) {
   matrix(unwrap_param(kernel$variance), nrow = nrow(X1), ncol = nrow(X2))
+}
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_matrix_grad.variance_kernel <- function(kernel, X1, X2) {
+  list(variance = matrix(1, nrow = nrow(X1), ncol = nrow(X2)))
+}
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_diag_grad.variance_kernel <- function(kernel, X1, X2) {
+  list(variance = rep(1, nrow(X1)))
 }

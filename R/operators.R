@@ -81,6 +81,22 @@ format.sum_kernel <- function(x, ...) {
   paste(format(x$subkernels[[1]]), "+", format(x$subkernels[[2]]))
 }
 
+# d(K1 + K2)/dtheta_i is just dK1/dtheta_i (if theta_i belongs to K1) or
+# dK2/dtheta_i (if it belongs to K2) -- concatenating the two subkernels'
+# raw gradients is all the sum rule needs here, since kernel_grad_raw()
+# tracks each hyperparameter *occurrence* positionally (like
+# get_free_params()), never merging same-named occurrences from different
+# subkernels into one.
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.sum_kernel <- function(kernel, x1, x2) {
+  c(
+    kernel_grad_raw(kernel$subkernels[[1]], x1, x2),
+    kernel_grad_raw(kernel$subkernels[[2]], x1, x2)
+  )
+}
+
 #' Product of two kernels
 #'
 #' @description
@@ -158,6 +174,27 @@ evaluate.product_kernel <- function(kernel, x1, x2 = NULL, ...) {
       call. = FALSE
     )
   }
+}
+
+# The product rule: d(K1 * K2)/dtheta_i = (dK1/dtheta_i) * K2 when theta_i
+# belongs to K1, and K1 * (dK2/dtheta_i) when it belongs to K2 -- each
+# subkernel's own evaluate() value multiplies the *other* subkernel's raw
+# gradient entries. Reuses .grad_times() (R/kernel-grad.R) since a
+# vector-valued hyperparameter's entry (feature_kernel()'s length_scale/
+# variance) is a list of matrices, not a bare matrix.
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.product_kernel <- function(kernel, x1, x2) {
+  left_kernel <- kernel$subkernels[[1]]
+  right_kernel <- kernel$subkernels[[2]]
+  left_value <- evaluate(left_kernel, x1, x2)
+  right_value <- evaluate(right_kernel, x1, x2)
+  .check_combinable_shapes(left_value, right_value, "product_kernel")
+
+  left_grad <- lapply(kernel_grad_raw(left_kernel, x1, x2), .grad_times, b = right_value)
+  right_grad <- lapply(kernel_grad_raw(right_kernel, x1, x2), function(g) .grad_times(left_value, g))
+  c(left_grad, right_grad)
 }
 
 #' @export

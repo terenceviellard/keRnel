@@ -56,6 +56,16 @@ shape.linear_kernel <- function(kernel, d) {
   unwrap_param(kernel$slope_var) * d
 }
 
+#' @export
+shape_grad.linear_kernel <- function(kernel, d) {
+  list(slope_var = d)
+}
+
+#' @export
+shape_grad_d.linear_kernel <- function(kernel, d) {
+  0 * d + unwrap_param(kernel$slope_var)
+}
+
 #' Affine kernel
 #'
 #' @description
@@ -108,6 +118,16 @@ shape.affine_kernel <- function(kernel, d) {
   unwrap_param(kernel$slope_var) * d
 }
 
+#' @export
+shape_grad.affine_kernel <- function(kernel, d) {
+  list(slope_var = d)
+}
+
+#' @export
+shape_grad_d.affine_kernel <- function(kernel, d) {
+  0 * d + unwrap_param(kernel$slope_var)
+}
+
 #' @keywords internal
 #' @exportS3Method
 pairwise_matrix.affine_kernel <- function(kernel, X1, X2) {
@@ -122,6 +142,27 @@ pairwise_diag.affine_kernel <- function(kernel, X1, X2) {
   X1c <- sweep(X1, 2, kernel$offset, "-")
   X2c <- sweep(X2, 2, kernel$offset, "-")
   shape(kernel, diag_distance(kernel$distance_function, X1c, X2c))
+}
+
+# affine_kernel() centers by `offset` before computing the distance (see
+# pairwise_matrix.affine_kernel() above), so it needs its own gradient
+# override too -- the pairwise_matrix_grad.dot_product_kernel() fallback
+# would otherwise differentiate the *uncentered* distance instead.
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_matrix_grad.affine_kernel <- function(kernel, X1, X2) {
+  X1c <- sweep(X1, 2, kernel$offset, "-")
+  X2c <- sweep(X2, 2, kernel$offset, "-")
+  shape_grad(kernel, distance_matrix(kernel$distance_function, X1c, X2c))
+}
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_diag_grad.affine_kernel <- function(kernel, X1, X2) {
+  X1c <- sweep(X1, 2, kernel$offset, "-")
+  X2c <- sweep(X2, 2, kernel$offset, "-")
+  shape_grad(kernel, diag_distance(kernel$distance_function, X1c, X2c))
 }
 
 #' Polynomial kernel
@@ -181,6 +222,20 @@ shape.polynomial_kernel <- function(kernel, d) {
   (gamma * d + kernel$constant)^kernel$degree
 }
 
+#' @export
+shape_grad.polynomial_kernel <- function(kernel, d) {
+  gamma <- unwrap_param(kernel$gamma)
+  base <- gamma * d + kernel$constant
+  list(gamma = kernel$degree * d * base^(kernel$degree - 1))
+}
+
+#' @export
+shape_grad_d.polynomial_kernel <- function(kernel, d) {
+  gamma <- unwrap_param(kernel$gamma)
+  base <- gamma * d + kernel$constant
+  kernel$degree * gamma * base^(kernel$degree - 1)
+}
+
 #' Sigmoid kernel
 #'
 #' @description
@@ -225,4 +280,16 @@ pairwise.sigmoid_kernel <- function(kernel, x1, x2) {
 #' @export
 shape.sigmoid_kernel <- function(kernel, d) {
   tanh(unwrap_param(kernel$alpha) * d + kernel$constant)
+}
+
+#' @export
+shape_grad.sigmoid_kernel <- function(kernel, d) {
+  s <- shape(kernel, d)
+  list(alpha = d * (1 - s^2))
+}
+
+#' @export
+shape_grad_d.sigmoid_kernel <- function(kernel, d) {
+  s <- shape(kernel, d)
+  unwrap_param(kernel$alpha) * (1 - s^2)
 }

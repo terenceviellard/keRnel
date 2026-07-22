@@ -4,11 +4,14 @@
 \alias{parametrisation}
 \alias{wrap}
 \alias{unwrap}
+\alias{unwrap_grad}
 \title{Parametrisations: transforming a hyperparameter to/from an unconstrained space}
 \usage{
 wrap(parametrisation, x)
 
 unwrap(parametrisation, x)
+
+unwrap_grad(parametrisation, x)
 }
 \arguments{
 \item{parametrisation}{A parametrisation object, e.g. one created by
@@ -16,10 +19,11 @@ unwrap(parametrisation, x)
 
 \item{x}{A numeric value or vector: in the constrained (natural) space
 when calling \code{wrap()}, in the unconstrained (wrapped) space when calling
-\code{unwrap()}.}
+\code{unwrap()}/\code{unwrap_grad()}.}
 }
 \value{
-A numeric value or vector, in the other space.
+A numeric value or vector, in the other space (\code{wrap()}/
+\code{unwrap()}), or the local derivative (\code{unwrap_grad()}).
 }
 \description{
 A parametrisation defines a bijective transformation between a
@@ -35,4 +39,10 @@ Numerical validation of the constraint (e.g. strict positivity) happens
 \emph{inside} \code{wrap()}, not duplicated in every kernel constructor: every code
 path that sets a wrapped value -- a kernel constructor, \code{kupdate()} --
 goes through \code{wrap()}, so the constraint only needs to be written once.
+
+\code{unwrap_grad()} is the derivative of \code{unwrap()} with respect to its own
+argument (the wrapped value) -- the piece \code{\link[=kernel_grad_free]{kernel_grad_free()}} needs to
+chain a \code{\link[=kernel_grad]{kernel_grad()}} gradient (natural space) into the free/wrapped
+space \code{\link[=get_free_params]{get_free_params()}}/\code{\link[=set_free_params]{set_free_params()}} work in:
+\code{d(unwrap(p, w))/dw}.
 }

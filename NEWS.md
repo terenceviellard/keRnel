@@ -36,6 +36,28 @@ dimension selection.
   space would otherwise pay every iteration, and correctly handles two
   hyperparameters sharing a bare name at different points in the tree
   (which `kupdate()` cannot set independently).
+* `kernel_grad()`: the analytic gradient of `evaluate(kernel, x1, x2)` with
+  respect to each non-frozen hyperparameter, for every base kernel, any
+  `sum_kernel()`/`product_kernel()` composition of them (including
+  `kernel_interactions()`), `exp_kernel()`, `log_kernel()`,
+  `active_dims_kernel()`, and `ard_kernel()` -- avoids the `2p + 1`
+  finite-difference evaluations per step a gradient-free optimiser needs.
+  `shape_grad()`/`shape_grad_d()`/`engine_grad()` are the underlying
+  per-kernel/per-engine building blocks, mirroring `shape()`/
+  `engine_eval()`; `ard_kernel()`'s gradient additionally requires its
+  wrapped kernel's `distance_function` to be one of
+  `squared_euclidean_distance()`/`euclidean_distance()`/
+  `manhattan_distance()`/`dot_product()`. Not yet supported: `batch_kernel()`,
+  `block_kernel()`, `block_diag_kernel()`, `input_specific_param_kernel()`.
+* `kernel_grad_free()`: like `kernel_grad()`, chain-ruled (via the new
+  `unwrap_grad()`) into the free/unconstrained space `get_free_params()`/
+  `set_free_params()` work in -- positional and unnamed, so it stays
+  correct even when two sub-kernels share a bare hyperparameter name (a
+  case `kupdate()`/`kernel_grad()`'s name-based APIs cannot address
+  independently). The intended pairing for an unconstrained optimiser
+  (e.g. `optim(method = "L-BFGS-B")` without box constraints, since
+  positivity is already guaranteed by each hyperparameter's
+  parametrisation).
 
 ## Bug fixes
 

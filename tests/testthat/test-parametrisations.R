@@ -65,3 +65,28 @@ test_that("parametrisation_chain with no parametrisations behaves like identity"
   expect_equal(wrap(chain, 5), 5)
   expect_equal(unwrap(chain, 5), 5)
 })
+
+# unwrap_grad() is checked against a central finite difference of unwrap()
+# itself -- the natural oracle for a derivative, and independent of how
+# unwrap_grad() is actually implemented for each parametrisation.
+expect_unwrap_grad_matches_finite_diff <- function(parametrisation, w, h = 1e-6, tolerance = 1e-6) {
+  numeric_grad <- (unwrap(parametrisation, w + h) - unwrap(parametrisation, w - h)) / (2 * h)
+  expect_equal(unwrap_grad(parametrisation, w), numeric_grad, tolerance = tolerance)
+}
+
+test_that("unwrap_grad() matches a finite difference of unwrap() for every parametrisation", {
+  expect_unwrap_grad_matches_finite_diff(identity_parametrisation(), -1.3)
+  expect_unwrap_grad_matches_finite_diff(log_exp_parametrisation(), 0.4)
+  expect_unwrap_grad_matches_finite_diff(softplus_parametrisation(), 0.4)
+  expect_unwrap_grad_matches_finite_diff(bounded_parametrisation(0, 10), 0.4)
+  expect_unwrap_grad_matches_finite_diff(
+    parametrisation_chain(bounded_parametrisation(0, 10), identity_parametrisation()),
+    0.4
+  )
+})
+
+test_that("unwrap_grad.log_exp_parametrisation() equals the unwrapped (natural) value", {
+  p <- log_exp_parametrisation()
+  w <- 0.7
+  expect_equal(unwrap_grad(p, w), unwrap(p, w), tolerance = 1e-10)
+})

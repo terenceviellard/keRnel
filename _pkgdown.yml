@@ -55,6 +55,11 @@ reference:
       - dense_engine
       - diagonal_engine
       - shape
+      - kernel_grad
+      - kernel_grad_free
+      - shape_grad
+      - shape_grad_d
+      - engine_grad
 
   - title: Hyperparameters
     desc: Inspecting, updating, freezing, and sampling a kernel's hyperparameters.
@@ -63,6 +68,8 @@ reference:
       - unwrap_param
       - get_params
       - get_trainable_params
+      - get_free_params
+      - set_free_params
       - kupdate
       - freeze
       - sample_hps

@@ -36,6 +36,19 @@ evaluate.exp_kernel <- function(kernel, x1, x2 = NULL, ...) {
   exp(evaluate(kernel$subkernels[[1]], x1, x2, ...))
 }
 
+# d(exp(k_inner))/dtheta = exp(k_inner) * dk_inner/dtheta -- the ordinary
+# chain rule, reusing .grad_times() (R/kernel-grad.R) so a vector-valued
+# hyperparameter's list-of-matrices entry (e.g. feature_kernel()'s
+# length_scale) is handled the same way as a plain matrix one.
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.exp_kernel <- function(kernel, x1, x2) {
+  inner <- kernel$subkernels[[1]]
+  k_outer <- exp(evaluate(inner, x1, x2))
+  lapply(kernel_grad_raw(inner, x1, x2), .grad_times, b = k_outer)
+}
+
 #' @export
 format.exp_kernel <- function(x, ...) {
   paste0("Exp(", format(x$subkernels[[1]]), ")")
@@ -72,6 +85,16 @@ log_kernel <- function(inner) {
 #' @export
 evaluate.log_kernel <- function(kernel, x1, x2 = NULL, ...) {
   log(evaluate(kernel$subkernels[[1]], x1, x2, ...))
+}
+
+# d(log(k_inner))/dtheta = dk_inner/dtheta / k_inner.
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.log_kernel <- function(kernel, x1, x2) {
+  inner <- kernel$subkernels[[1]]
+  k_inner <- evaluate(inner, x1, x2)
+  lapply(kernel_grad_raw(inner, x1, x2), function(g) .grad_times(g, 1 / k_inner))
 }
 
 #' @export
@@ -131,6 +154,23 @@ evaluate.active_dims_kernel <- function(kernel, x1, x2 = NULL, ...) {
   X1 <- X1[, kernel$active_dims, drop = FALSE]
   X2 <- if (is.null(x2)) NULL else as_matrix_input(x2)[, kernel$active_dims, drop = FALSE]
   evaluate(kernel$subkernels[[1]], X1, X2, ...)
+}
+
+# active_dims_kernel() has no hyperparameter of its own (active_dims is a
+# fixed integer index, not optimisable) -- it just selects columns before
+# delegating, so its gradient is the inner kernel's gradient on the same
+# selected columns, no new derivative math needed.
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.active_dims_kernel <- function(kernel, x1, x2) {
+  X1 <- as_matrix_input(x1)
+  X2 <- as_matrix_input(if (is.null(x2)) x1 else x2)
+  kernel_grad_raw(
+    kernel$subkernels[[1]],
+    X1[, kernel$active_dims, drop = FALSE],
+    X2[, kernel$active_dims, drop = FALSE]
+  )
 }
 
 #' @export
@@ -220,6 +260,91 @@ evaluate.ard_kernel <- function(kernel, x1, x2 = NULL, ...) {
   X1 <- sweep(X1, 2, length_scales, "/")
   X2 <- if (is.null(x2)) NULL else sweep(as_matrix_input(x2), 2, length_scales, "/")
   evaluate(kernel$subkernels[[1]], X1, X2, ...)
+}
+
+# ard_kernel() feeds its inner kernel distance_function(x1 / length_scales,
+# x2 / length_scales) -- length_scales therefore enters through the
+# *distance*, not directly as one of the inner kernel's own hyperparameters
+# (which shape_grad() differentiates against). d(distance)/d(length_scales[k])
+# is derived here via the chain rule through u = x / length_scales,
+# dimension by dimension, for the vectorised distance functions
+# distance_matrix() itself knows a closed form for (besides equality(), a
+# non-differentiable step function): writing f(u1, u2) for the distance in
+# rescaled space,
+#   d(f)/d(length_scales[k]) = df/du1[k] * du1[k]/d(length_scales[k])
+#                             + df/du2[k] * du2[k]/d(length_scales[k])
+# with du1[k]/d(length_scales[k]) = -x1[k] / length_scales[k]^2 (and
+# likewise for u2) -- only dimension k's own length_scale affects u1[k]/
+# u2[k], so no cross-dimension terms appear.
+
+#' @keywords internal
+.ard_distance_grad <- function(distance_function, X1, X2, length_scales) {
+  is_squared_euclidean <- identical(distance_function, squared_euclidean_distance)
+  is_euclidean <- identical(distance_function, euclidean_distance)
+  is_manhattan <- identical(distance_function, manhattan_distance)
+  is_dot_product <- identical(distance_function, dot_product)
+  if (!any(is_squared_euclidean, is_euclidean, is_manhattan, is_dot_product)) {
+    stop(
+      "ard_kernel() has no analytic gradient for this `distance_function` -- only ",
+      "squared_euclidean_distance(), euclidean_distance(), manhattan_distance(), ",
+      "and dot_product() are supported.",
+      call. = FALSE
+    )
+  }
+
+  U1 <- sweep(X1, 2, length_scales, "/")
+  U2 <- sweep(X2, 2, length_scales, "/")
+  d <- if (is_euclidean) distance_matrix(distance_function, U1, U2) else NULL
+
+  lapply(seq_len(ncol(X1)), function(k) {
+    diff_k <- outer(U1[, k], U2[, k], "-")
+    if (is_squared_euclidean) {
+      df_du1 <- 2 * diff_k
+      df_du2 <- -df_du1
+    } else if (is_euclidean) {
+      df_du1 <- ifelse(d == 0, 0, diff_k / d)
+      df_du2 <- -df_du1
+    } else if (is_manhattan) {
+      df_du1 <- sign(diff_k)
+      df_du2 <- -df_du1
+    } else {
+      df_du1 <- matrix(U2[, k], nrow = nrow(U1), ncol = nrow(U2), byrow = TRUE)
+      df_du2 <- matrix(U1[, k], nrow = nrow(U1), ncol = nrow(U2))
+    }
+    du1_k <- -X1[, k] / length_scales[k]^2
+    du2_k <- -X2[, k] / length_scales[k]^2
+    sweep(df_du1, 1, du1_k, "*") + sweep(df_du2, 2, du2_k, "*")
+  })
+}
+
+#' @keywords internal
+#' @exportS3Method
+kernel_grad_raw.ard_kernel <- function(kernel, x1, x2) {
+  inner <- kernel$subkernels[[1]]
+  length_scales <- unwrap_param(kernel$length_scales)
+  X1 <- as_matrix_input(x1)
+  X2 <- as_matrix_input(if (is.null(x2)) x1 else x2)
+  X1s <- sweep(X1, 2, length_scales, "/")
+  X2s <- sweep(X2, 2, length_scales, "/")
+
+  own_grad <- list()
+  if (!isTRUE(kernel$length_scales$frozen)) {
+    if (!has_s3_method("shape", inner) || !has_s3_method("shape_grad_d", inner)) {
+      stop(
+        "kernel_grad() is not implemented for ard_kernel(", class(inner)[1], ", ...) -- ",
+        "analytic ARD gradients require the wrapped kernel to have a shape()/",
+        "shape_grad_d() method (the base stationary/dot-product kernels do; ",
+        "feature_kernel() and composite kernels do not).",
+        call. = FALSE
+      )
+    }
+    d <- distance_matrix(inner$distance_function, X1s, X2s)
+    dd_dls <- .ard_distance_grad(inner$distance_function, X1, X2, length_scales)
+    dshape_dd <- shape_grad_d(inner, d)
+    own_grad <- list(length_scales = lapply(dd_dls, function(g) dshape_dd * g))
+  }
+
+  c(own_grad, kernel_grad_raw(inner, X1s, X2s))
 }
 
 #' @export

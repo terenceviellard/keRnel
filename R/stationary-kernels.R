@@ -53,6 +53,19 @@ shape.se_kernel <- function(kernel, d) {
   exp(-0.5 * d / length_scale^2)
 }
 
+#' @export
+shape_grad.se_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  s <- shape(kernel, d)
+  list(length_scale = s * d / length_scale^3)
+}
+
+#' @export
+shape_grad_d.se_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  -0.5 * shape(kernel, d) / length_scale^2
+}
+
 #' Matern kernels
 #'
 #' @description
@@ -107,6 +120,19 @@ shape.matern12_kernel <- function(kernel, d) {
   exp(-d / length_scale)
 }
 
+#' @export
+shape_grad.matern12_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  s <- shape(kernel, d)
+  list(length_scale = s * d / length_scale^2)
+}
+
+#' @export
+shape_grad_d.matern12_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  -shape(kernel, d) / length_scale
+}
+
 #' @rdname matern_kernels
 #' @export
 matern32_kernel <- function(length_scale,
@@ -137,6 +163,20 @@ shape.matern32_kernel <- function(kernel, d) {
   (1 + scaled) * exp(-scaled)
 }
 
+#' @export
+shape_grad.matern32_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  scaled <- sqrt(3) * d / length_scale
+  list(length_scale = scaled^2 * exp(-scaled) / length_scale)
+}
+
+#' @export
+shape_grad_d.matern32_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  scaled <- sqrt(3) * d / length_scale
+  -scaled * sqrt(3) * exp(-scaled) / length_scale
+}
+
 #' @rdname matern_kernels
 #' @export
 matern52_kernel <- function(length_scale,
@@ -165,6 +205,22 @@ shape.matern52_kernel <- function(kernel, d) {
   length_scale <- unwrap_param(kernel$length_scale)
   scaled <- sqrt(5) * d / length_scale
   (1 + scaled + (5 / 3) * (d / length_scale)^2) * exp(-scaled)
+}
+
+#' @export
+shape_grad.matern52_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  u <- d / length_scale
+  scaled <- sqrt(5) * u
+  list(length_scale = (5 / 3) * u^2 * (1 + scaled) * exp(-scaled) / length_scale)
+}
+
+#' @export
+shape_grad_d.matern52_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  u <- d / length_scale
+  scaled <- sqrt(5) * u
+  -(5 / 3) * u * (1 + scaled) * exp(-scaled) / length_scale
 }
 
 #' Periodic kernel
@@ -232,6 +288,26 @@ shape.periodic_kernel <- function(kernel, d) {
   exp(-2 * sin(pi * d / period)^2 / length_scale^2)
 }
 
+#' @export
+shape_grad.periodic_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  period <- unwrap_param(kernel$period)
+  arg <- pi * d / period
+  s <- shape(kernel, d)
+  list(
+    length_scale = s * 4 * sin(arg)^2 / length_scale^3,
+    period = s * 2 * pi * d * sin(2 * arg) / (length_scale^2 * period^2)
+  )
+}
+
+#' @export
+shape_grad_d.periodic_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  period <- unwrap_param(kernel$period)
+  arg <- pi * d / period
+  -2 * shape(kernel, d) * pi * sin(2 * arg) / (length_scale^2 * period)
+}
+
 #' Rational quadratic kernel
 #'
 #' @description
@@ -288,6 +364,26 @@ shape.rational_quadratic_kernel <- function(kernel, d) {
   (1 + d / (2 * alpha * length_scale^2))^(-alpha)
 }
 
+#' @export
+shape_grad.rational_quadratic_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  alpha <- unwrap_param(kernel$alpha)
+  base <- 1 + d / (2 * alpha * length_scale^2)
+  s <- base^(-alpha)
+  list(
+    length_scale = s * d / (length_scale^3 * base),
+    alpha = s * ((base - 1) / base - log(base))
+  )
+}
+
+#' @export
+shape_grad_d.rational_quadratic_kernel <- function(kernel, d) {
+  length_scale <- unwrap_param(kernel$length_scale)
+  alpha <- unwrap_param(kernel$alpha)
+  base <- 1 + d / (2 * alpha * length_scale^2)
+  -shape(kernel, d) / (2 * length_scale^2 * base)
+}
+
 #' White noise kernel
 #'
 #' @description
@@ -334,6 +430,16 @@ pairwise.white_noise_kernel <- function(kernel, x1, x2) {
 #' @export
 shape.white_noise_kernel <- function(kernel, d) {
   d * unwrap_param(kernel$noise)
+}
+
+#' @export
+shape_grad.white_noise_kernel <- function(kernel, d) {
+  list(noise = d)
+}
+
+#' @export
+shape_grad_d.white_noise_kernel <- function(kernel, d) {
+  0 * d + unwrap_param(kernel$noise)
 }
 
 #' Feature kernel
@@ -444,4 +550,46 @@ pairwise_diag.feature_kernel <- function(kernel, X1, X2) {
   (s$variance[1] * s$variance[2] /
     ((2 * pi)^(ncol(X1) / 2) * sqrt(sigma_det))) *
     exp(-0.5 * d / s$sigma_diag)
+}
+
+# feature_kernel() has no shape() method (its formula isn't a function of
+# the distance alone -- length_scale/length_scale_u also rescale the
+# prefactor, not just the exponent), so its gradient is written directly
+# against pairwise_matrix()/pairwise_diag() rather than via shape_grad().
+# Writing k = A * Sigma^(-1/2) * exp(-0.5 d / Sigma) (A = variance[1] *
+# variance[2] / (2 pi)^(D/2), constant w.r.t. Sigma) gives
+# d(ln k)/d(Sigma) = -1/(2 Sigma) + 0.5 d / Sigma^2 = (d - Sigma) / (2
+# Sigma^2); length_scale[1]/length_scale[2]/length_scale_u each contribute
+# to Sigma with coefficient 1, so they share this same partial derivative.
+# variance[1]/variance[2] enter k linearly, so d(k)/d(variance[i]) = k /
+# variance[i].
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_matrix_grad.feature_kernel <- function(kernel, X1, X2) {
+  s <- .feature_kernel_sigma(kernel)
+  sigma <- s$sigma_diag
+  k <- pairwise_matrix.feature_kernel(kernel, X1, X2)
+  d <- distance_matrix(kernel$distance_function, X1, X2)
+  grad_sigma <- k * (d - sigma) / (2 * sigma^2)
+  list(
+    length_scale = list(grad_sigma, grad_sigma),
+    length_scale_u = grad_sigma,
+    variance = list(k / s$variance[1], k / s$variance[2])
+  )
+}
+
+#' @keywords internal
+#' @exportS3Method
+pairwise_diag_grad.feature_kernel <- function(kernel, X1, X2) {
+  s <- .feature_kernel_sigma(kernel)
+  sigma <- s$sigma_diag
+  k <- pairwise_diag.feature_kernel(kernel, X1, X2)
+  d <- diag_distance(kernel$distance_function, X1, X2)
+  grad_sigma <- k * (d - sigma) / (2 * sigma^2)
+  list(
+    length_scale = list(grad_sigma, grad_sigma),
+    length_scale_u = grad_sigma,
+    variance = list(k / s$variance[1], k / s$variance[2])
+  )
 }

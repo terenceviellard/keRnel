@@ -15,13 +15,20 @@
 #' path that sets a wrapped value -- a kernel constructor, `kupdate()` --
 #' goes through `wrap()`, so the constraint only needs to be written once.
 #'
+#' `unwrap_grad()` is the derivative of `unwrap()` with respect to its own
+#' argument (the wrapped value) -- the piece [kernel_grad_free()] needs to
+#' chain a [kernel_grad()] gradient (natural space) into the free/wrapped
+#' space [get_free_params()]/[set_free_params()] work in:
+#' `d(unwrap(p, w))/dw`.
+#'
 #' @param parametrisation A parametrisation object, e.g. one created by
 #'   [log_exp_parametrisation()].
 #' @param x A numeric value or vector: in the constrained (natural) space
 #'   when calling `wrap()`, in the unconstrained (wrapped) space when calling
-#'   `unwrap()`.
+#'   `unwrap()`/`unwrap_grad()`.
 #'
-#' @return A numeric value or vector, in the other space.
+#' @return A numeric value or vector, in the other space (`wrap()`/
+#'   `unwrap()`), or the local derivative (`unwrap_grad()`).
 #' @name parametrisation
 NULL
 
@@ -35,6 +42,12 @@ wrap <- function(parametrisation, x) {
 #' @export
 unwrap <- function(parametrisation, x) {
   UseMethod("unwrap")
+}
+
+#' @rdname parametrisation
+#' @export
+unwrap_grad <- function(parametrisation, x) {
+  UseMethod("unwrap_grad")
 }
 
 #' Reject non-numeric/non-finite input before any parametrisation transform
@@ -88,6 +101,11 @@ wrap.identity_parametrisation <- function(parametrisation, x) {
 #' @export
 unwrap.identity_parametrisation <- function(parametrisation, x) x
 
+#' @export
+unwrap_grad.identity_parametrisation <- function(parametrisation, x) {
+  0 * x + 1
+}
+
 #' Log-exp parametrisation (strictly positive constraint)
 #'
 #' @description
@@ -117,6 +135,9 @@ wrap.log_exp_parametrisation <- function(parametrisation, x) {
 #' @export
 unwrap.log_exp_parametrisation <- function(parametrisation, x) exp(x)
 
+#' @export
+unwrap_grad.log_exp_parametrisation <- function(parametrisation, x) exp(x)
+
 #' Softplus parametrisation (strictly positive constraint, alternative to log-exp)
 #'
 #' @description
@@ -144,6 +165,9 @@ wrap.softplus_parametrisation <- function(parametrisation, x) {
 
 #' @export
 unwrap.softplus_parametrisation <- function(parametrisation, x) log(1 + exp(x))
+
+#' @export
+unwrap_grad.softplus_parametrisation <- function(parametrisation, x) stats::plogis(x)
 
 #' Bounded parametrisation (interval constraint)
 #'
@@ -190,6 +214,11 @@ unwrap.bounded_parametrisation <- function(parametrisation, x) {
   lower + (upper - lower) * stats::plogis(x)
 }
 
+#' @export
+unwrap_grad.bounded_parametrisation <- function(parametrisation, x) {
+  (parametrisation$upper - parametrisation$lower) * stats::dlogis(x)
+}
+
 #' Chain of parametrisations
 #'
 #' @description
@@ -221,4 +250,14 @@ wrap.parametrisation_chain <- function(parametrisation, x) {
 unwrap.parametrisation_chain <- function(parametrisation, x) {
   for (p in rev(parametrisation$parametrisations)) x <- unwrap(p, x)
   x
+}
+
+#' @export
+unwrap_grad.parametrisation_chain <- function(parametrisation, x) {
+  grad <- 1
+  for (p in rev(parametrisation$parametrisations)) {
+    grad <- grad * unwrap_grad(p, x)
+    x <- unwrap(p, x)
+  }
+  grad
 }
