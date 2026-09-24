@@ -20,24 +20,29 @@ NULL
 #' @examples
 #' euclidean_distance(c(0, 0), c(3, 4))
 euclidean_distance <- function(x1, x2) sqrt(sum((x1 - x2)^2))
+attr(euclidean_distance, "distance_name") <- "euclidean"
 
 #' @rdname distances
 #' @export
 squared_euclidean_distance <- function(x1, x2) sum((x1 - x2)^2)
+attr(squared_euclidean_distance, "distance_name") <- "squared_euclidean"
 
 #' @rdname distances
 #' @export
 manhattan_distance <- function(x1, x2) sum(abs(x1 - x2))
+attr(manhattan_distance, "distance_name") <- "manhattan"
 
 #' @rdname distances
 #' @export
 chebyshev_distance <- function(x1, x2) max(abs(x1 - x2))
+attr(chebyshev_distance, "distance_name") <- "chebyshev"
 
 #' @rdname distances
 #' @export
 cosine_distance <- function(x1, x2) {
   1 - sum(x1 * x2) / (sqrt(sum(x1^2)) * sqrt(sum(x2^2)))
 }
+attr(cosine_distance, "distance_name") <- "cosine"
 
 #' @rdname distances
 #' @export
@@ -48,6 +53,7 @@ minkowski_distance <- function(x1, x2, p) {
 #' @rdname distances
 #' @export
 hamming_distance <- function(x1, x2) sum(x1 != x2)
+attr(hamming_distance, "distance_name") <- "hamming"
 
 #' @rdname distances
 #' @export
@@ -56,6 +62,7 @@ jaccard_distance <- function(x1, x2) {
   union <- sum(pmax(x1, x2))
   1 - intersection / union
 }
+attr(jaccard_distance, "distance_name") <- "jaccard"
 
 #' @rdname distances
 #' @export
@@ -69,12 +76,14 @@ mahalanobis_distance <- function(x1, x2, inv_cov_matrix) {
 canberra_distance <- function(x1, x2) {
   sum(abs(x1 - x2) / (abs(x1) + abs(x2) + 1e-10))
 }
+attr(canberra_distance, "distance_name") <- "canberra"
 
 #' @rdname distances
 #' @export
 bray_curtis_distance <- function(x1, x2) {
   sum(abs(x1 - x2)) / sum(abs(x1 + x2) + 1e-10)
 }
+attr(bray_curtis_distance, "distance_name") <- "bray_curtis"
 
 #' @rdname distances
 #' @export
@@ -85,10 +94,12 @@ correlation_distance <- function(x1, x2) {
   denominator <- sqrt(sum((x1 - x1_mean)^2) * sum((x2 - x2_mean)^2))
   1 - numerator / (denominator + 1e-10)
 }
+attr(correlation_distance, "distance_name") <- "correlation"
 
 #' @rdname distances
 #' @export
 dot_product <- function(x1, x2) sum(x1 * x2)
+attr(dot_product, "distance_name") <- "dot_product"
 
 #' @rdname distances
 #' @export
@@ -96,11 +107,24 @@ dot_product <- function(x1, x2) sum(x1 * x2)
 #' equality(c(1, 2), c(1, 2))
 #' equality(c(1, 2), c(1, 3))
 equality <- function(x1, x2) as.numeric(isTRUE(all(x1 == x2)))
+attr(equality, "distance_name") <- "equality"
 
 # Registry used by resolve_distance_function(). Only the simple two-argument
 # distances are listed here -- minkowski_distance()/mahalanobis_distance()
 # need an extra argument (`p`/`inv_cov_matrix`), so a bare string shortcut
 # would not be enough to fully specify them.
+#
+# Each entry above also carries a "distance_name" attribute, set right after
+# its definition. That attribute -- not identical()/pointer equality on the
+# function itself -- is what callers (.ard_distance_grad() in wrappers.R, and
+# this file's own tests) should use to recognize "this is the euclidean
+# distance" etc. covr's coverage instrumentation rewrites each function's
+# body in place; a plain list like this one below still captures the
+# function *value* at the time it runs, so under covr that captured copy and
+# the live, later-instrumented binding of the same-named function stop being
+# identical() to one another even though they compute the same thing --
+# their shared "distance_name" attribute (untouched by body rewriting)
+# survives that and stays a reliable identity check either way.
 .distance_registry <- list(
   euclidean = euclidean_distance,
   squared_euclidean = squared_euclidean_distance,

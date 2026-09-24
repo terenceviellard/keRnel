@@ -21,19 +21,23 @@
 #' @return A numeric matrix of dimension `nrow(X1)` x `nrow(X2)`.
 #' @keywords internal
 distance_matrix <- function(distance_function, X1, X2) {
-  if (identical(distance_function, squared_euclidean_distance)) {
+  # Dispatch on the "distance_name" attribute (set in R/distances.R), not
+  # identical() on the function itself -- see that file's comment above
+  # .distance_registry for why identical() is not covr-safe here.
+  distance_name <- attr(distance_function, "distance_name")
+  if (identical(distance_name, "squared_euclidean")) {
     return(.squared_euclidean_distance_matrix(X1, X2))
   }
-  if (identical(distance_function, euclidean_distance)) {
+  if (identical(distance_name, "euclidean")) {
     return(sqrt(.squared_euclidean_distance_matrix(X1, X2)))
   }
-  if (identical(distance_function, manhattan_distance)) {
+  if (identical(distance_name, "manhattan")) {
     return(.manhattan_distance_matrix(X1, X2))
   }
-  if (identical(distance_function, dot_product)) {
+  if (identical(distance_name, "dot_product")) {
     return(X1 %*% t(X2))
   }
-  if (identical(distance_function, equality)) {
+  if (identical(distance_name, "equality")) {
     return(.equality_matrix(X1, X2))
   }
   # No known vectorised form: fall back to the generic, slower mapping.
@@ -162,19 +166,23 @@ shape <- function(kernel, d) {
 #' @return A numeric vector of length `nrow(X1)`.
 #' @keywords internal
 diag_distance <- function(distance_function, X1, X2) {
-  if (identical(distance_function, squared_euclidean_distance)) {
+  # Dispatch on the "distance_name" attribute (set in R/distances.R), not
+  # identical() on the function itself -- see that file's comment above
+  # .distance_registry for why identical() is not covr-safe here.
+  distance_name <- attr(distance_function, "distance_name")
+  if (identical(distance_name, "squared_euclidean")) {
     return(rowSums((X1 - X2)^2))
   }
-  if (identical(distance_function, euclidean_distance)) {
+  if (identical(distance_name, "euclidean")) {
     return(sqrt(rowSums((X1 - X2)^2)))
   }
-  if (identical(distance_function, manhattan_distance)) {
+  if (identical(distance_name, "manhattan")) {
     return(rowSums(abs(X1 - X2)))
   }
-  if (identical(distance_function, dot_product)) {
+  if (identical(distance_name, "dot_product")) {
     return(rowSums(X1 * X2))
   }
-  if (identical(distance_function, equality)) {
+  if (identical(distance_name, "equality")) {
     return(as.numeric(rowSums(X1 == X2) == ncol(X1)))
   }
   # No known vectorised form: fall back to the generic, slower mapping.

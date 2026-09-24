@@ -56,7 +56,14 @@ test_that("canberra, bray_curtis and correlation distances behave on simple case
 
 test_that("resolve_distance_function accepts functions and shortcut names", {
   expect_identical(resolve_distance_function(euclidean_distance), euclidean_distance)
-  expect_identical(resolve_distance_function("manhattan"), manhattan_distance)
+  # Not expect_identical() against manhattan_distance directly: under covr's
+  # coverage instrumentation, the function value resolve_distance_function()
+  # returns (captured in .distance_registry when the package loads) and a
+  # fresh lookup of manhattan_distance (re-instrumented later by covr) stop
+  # being identical() to each other even though both compute the same
+  # distance -- see R/distances.R's comment above .distance_registry. Their
+  # shared "distance_name" attribute is what actually identifies them.
+  expect_identical(attr(resolve_distance_function("manhattan"), "distance_name"), "manhattan")
 })
 
 test_that("resolve_distance_function rejects unknown shortcuts and non-function values", {

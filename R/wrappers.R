@@ -279,10 +279,17 @@ evaluate.ard_kernel <- function(kernel, x1, x2 = NULL, ...) {
 
 #' @keywords internal
 .ard_distance_grad <- function(distance_function, X1, X2, length_scales) {
-  is_squared_euclidean <- identical(distance_function, squared_euclidean_distance)
-  is_euclidean <- identical(distance_function, euclidean_distance)
-  is_manhattan <- identical(distance_function, manhattan_distance)
-  is_dot_product <- identical(distance_function, dot_product)
+  # Dispatch on the "distance_name" attribute (set in R/distances.R), not
+  # identical() on the function itself: covr's coverage instrumentation
+  # rewrites function bodies in place, which can make two references to
+  # "the same" distance function stop being identical() to each other (see
+  # R/distances.R's comment above .distance_registry) even though the
+  # attribute -- untouched by that rewriting -- still agrees.
+  distance_name <- attr(distance_function, "distance_name")
+  is_squared_euclidean <- identical(distance_name, "squared_euclidean")
+  is_euclidean <- identical(distance_name, "euclidean")
+  is_manhattan <- identical(distance_name, "manhattan")
+  is_dot_product <- identical(distance_name, "dot_product")
   if (!any(is_squared_euclidean, is_euclidean, is_manhattan, is_dot_product)) {
     stop(
       "ard_kernel() has no analytic gradient for this `distance_function` -- only ",

@@ -55,7 +55,10 @@ test_that("se_kernel rejects non-positive length_scale at construction", {
 
 test_that("se_kernel accepts a distance_function shortcut name", {
   k <- se_kernel(length_scale = 1, distance_function = "euclidean")
-  expect_identical(k$distance_function, euclidean_distance)
+  # Not expect_identical() against euclidean_distance directly -- see
+  # R/distances.R's comment above .distance_registry: that comparison is not
+  # covr-safe. The shared "distance_name" attribute is the reliable check.
+  expect_identical(attr(k$distance_function, "distance_name"), "euclidean")
 })
 
 test_that("rbf_kernel is an alias for se_kernel", {
